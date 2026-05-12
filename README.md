@@ -31,10 +31,10 @@ We provide a script to handle the build process and install the required Python 
 ```
 
 **What this script does:**
-1. Navigates to the `raw_transfer` directory.
-2. Compiles the `raw_transfer_binaries` using Bazel (it uses `--disk_cache` to speed up subsequent builds).
+1. Navigates to the workspace directory.
+2. Compiles the `//raw_transfer:raw_transfer_binaries` target using Bazel (it uses `--disk_cache` to speed up subsequent builds).
 3. Installs the necessary Python dependencies listed in `requirements.txt`.
-4. Artifacts will be available in the `raw_transfer/bazel-bin/` directory.
+4. Artifacts will be available in the `bazel-bin/raw_transfer/` directory.
 
 ## Testing `raw_transfer`
 

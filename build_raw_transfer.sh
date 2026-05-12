@@ -7,19 +7,17 @@ DEFAULT_WORKSPACE_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="${WORKSPACE_DIR:-${DEFAULT_WORKSPACE_DIR}}"
 BAZEL_DISK_CACHE="${BAZEL_CACHE_DIR:-/mnt/disks/jcgu/bazel_cache/disk_cache}"
 BAZEL_REPO_CACHE="${BAZEL_CACHE_DIR:-/mnt/disks/jcgu/bazel_cache/repo_cache}"
-RAW_TRANSFER_DIR="${WORKSPACE_DIR}/raw_transfer"
 
-echo "=== Navigating to raw_transfer_lib directory ==="
-cd "${RAW_TRANSFER_DIR}"
+echo "=== Navigating to workspace directory ==="
+cd "${WORKSPACE_DIR}"
 
 echo "=== Building raw_transfer with Bazel ==="
-bazel build -c opt --check_visibility=false //:raw_transfer_binaries --disk_cache=${BAZEL_DISK_DIR} --repository_cache=${BAZEL_REPO_DIR}
+bazel build -c opt --check_visibility=false //raw_transfer:raw_transfer_binaries --disk_cache=${BAZEL_DISK_CACHE} --repository_cache=${BAZEL_REPO_CACHE}
 
 echo "=== Build Complete! ==="
-echo "Artifacts are located in: ${RAW_TRANSFER_DIR}/bazel-bin/"
+echo "Artifacts are located in: ${WORKSPACE_DIR}/bazel-bin/raw_transfer/"
 
 echo "=== Install Python Dependencies! ==="
-cd ${WORKSPACE_DIR}
 pip install -r requirements.txt
 
 echo "=== Installation Complete! ==="

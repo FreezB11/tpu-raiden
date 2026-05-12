@@ -1,21 +1,16 @@
 #!/bin/bash
 set -e
 
-# Define directories
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-DEFAULT_WORKSPACE_DIR="$SCRIPT_DIR"
-WORKSPACE_DIR="${WORKSPACE_DIR:-${DEFAULT_WORKSPACE_DIR}}"
-RAW_TRANSFER_DIR="${WORKSPACE_DIR}/raw_transfer"
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
-export PYTHONPATH=$RAW_TRANSFER_DIR/bazel-bin:$PYTHONPATH
+# Point to the directory containing the compiled raw_transfer.so
+export PYTHONPATH="${WORKSPACE_DIR}/bazel-bin/raw_transfer:${PYTHONPATH}"
 
-cd "${RAW_TRANSFER_DIR}"
-echo "========================================"
-echo "Running: test_import.py"
-echo "========================================"
-python test_import.py 2>&1 | tee ${WORKSPACE_DIR}/import.log
+# Change to the tests directory to avoid Python's local directory import shadowing
+cd "${WORKSPACE_DIR}/raw_transfer"
 
-echo "========================================"
-echo "Running: test_raw_transfer_perf.py"
-echo "========================================"
-python test_raw_transfer_perf.py 2>&1 | tee ${WORKSPACE_DIR}/perf_test.log
+echo "=== Running: test_import.py ==="
+python test_import.py 2>&1 | tee "${WORKSPACE_DIR}/import.log"
+
+echo "=== Running: test_raw_transfer_perf.py ==="
+python test_raw_transfer_perf.py 2>&1 | tee "${WORKSPACE_DIR}/perf_test.log"

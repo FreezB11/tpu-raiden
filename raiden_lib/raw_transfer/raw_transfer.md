@@ -6,16 +6,6 @@ The `raw_transfer` library is a custom C++ extension for python MLframeworks (e.
 designed to perform high-performance, asynchronous device-to-host (D2H) and host-to-device
 (H2D) data transfers for sharded arrays on TPU. It bypasses standard XLA buffer
 management to achieve lower overhead and higher throughput.
-## Build and Verification Instructions
-
-To compile and invoke all standard unit validations straight against active remote Ghostfish and Ghostlite buffers without needing cross-DSO VCS modifications, leverage absolute internal visibility exclusions:
-
-```bash
-blaze test //third_party/tpu_raiden/raiden_lib/raw_transfer:raw_transfer_perf_gl //third_party/tpu_raiden/raiden_lib/raw_transfer:raw_transfer_perf_gf --check_visibility=false -c opt
-```
-
-> [!NOTE]
-> Applying the universal `--check_visibility=false` override natively unrolls deep dependencies (forwards onto `jax`, `nanobind`, and `xla` base packages) independently of manual downstream changelist patches. This securely shields organizational VCS integrity!
 
 ## API Reference
 

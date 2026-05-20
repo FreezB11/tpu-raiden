@@ -33,9 +33,6 @@ Python orchestration scripts via non-blocking tuple lambda futures.
   bounds checks and chunk aggregation math into centralized private dispatch
   macros (`GetMajorSliceByteSize`, `DispatchD2hChunks`), eliminating
   duplicate buffer lifetime handling code entirely across core modules.
-* **Submitted Base Integration CLs**:
-  * Upstream Base Engine Submission: [cl/914873710](http://cl/914873710)
-  * Upstream Cleanup Optimization Submission: [cl/914875043](http://cl/914875043)
 
 ### Dynamic Host Memory Column Block Allocation
 
@@ -49,7 +46,6 @@ Python orchestration scripts via non-blocking tuple lambda futures.
   sub-regions without requiring manual destination layout strides. Binds
   tuple arrays containing assigned block IDs and future handles directly via
   nanobind.
-* **Submitted Upstream Integration CL**: [cl/914929245](http://cl/914929245)
 
 ### Host Memory Internal Buffer Allocation
 
@@ -68,7 +64,6 @@ Python orchestration scripts via non-blocking tuple lambda futures.
   loops wrapped within bounding 50ms non-blocking `poll` constraints to
   guarantee immediate listener thread termination joins upon sandbox container
   destruction.
-* **Submitted Upstream Prototyping CL**: [cl/914933239](http://cl/914933239)
 
 ### Block-Level Distributed Server Integration (Active Stage)
 
@@ -91,7 +86,6 @@ Python orchestration scripts via non-blocking tuple lambda futures.
   offset locations locally on the fly, bypassing raw virtual base addresses
   entirely. Implements automated column assignments during push streams and
   local allocations during pulling symmetrically.
-* **Active Review Integration Citation**: [cl/914949987](http://cl/914949987)
 
 ---
 

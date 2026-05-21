@@ -20,6 +20,7 @@ py_strict_library(
     name = "raiden_lib",
     srcs = ["__init__.py"],
     deps = [
-        "//raiden_lib/raw_transfer",
+        "//raiden_lib/raw_transfer/jax:raw_transfer",
+        "//raiden_lib/raw_transfer/torch:torch_raw_transfer",
     ],
 )

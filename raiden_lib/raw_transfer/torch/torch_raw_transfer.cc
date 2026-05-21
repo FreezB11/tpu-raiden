@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#if __has_include( \
-    "raiden_lib/raw_transfer/raw_transfer_core.h")
 #include "raiden_lib/raw_transfer/raw_transfer_core.h"
-#elif __has_include("raiden_lib/raw_transfer/raw_transfer_core.h")
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
-#else
-#include "raw_transfer_core.h"
-#endif
 
 #include <cstdint>
 #include <memory>
@@ -41,11 +34,7 @@
 #include "torch_tpu/eager/materialize.h"
 #include "torch_tpu/eager/structured_log_buffer.h"
 #include "torch_tpu/eager/tensor_to_buffer.h"
-#if __has_include("xla/pjrt/pjrt_client.h")
 #include "xla/pjrt/pjrt_client.h"
-#else
-#include "xla/pjrt/pjrt_client.h"
-#endif
 
 namespace py = pybind11;
 

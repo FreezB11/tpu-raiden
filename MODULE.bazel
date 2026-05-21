@@ -3,7 +3,6 @@ module(name = "tpu_raiden")
 bazel_dep(name = "protobuf", version = "32.1", repo_name = "com_google_protobuf")
 bazel_dep(name = "rules_cc", version = "0.2.9")
 bazel_dep(name = "platforms", version = "1.0.0")
-
 bazel_dep(name = "rules_ml_toolchain")
 archive_override(
     module_name = "rules_ml_toolchain",
@@ -15,17 +14,19 @@ archive_override(
 bazel_dep(name = "jax")
 git_override(
     module_name = "jax",
-    remote = "https://github.com/jax-ml/jax.git",
     commit = "a33ed614c58ee8a10d0b7536c50c2609c38500c1",
+    remote = "https://github.com/jax-ml/jax.git",
 )
 
 bazel_dep(name = "xla")
 git_override(
     module_name = "xla",
-    remote = "https://github.com/openxla/xla.git",
-    commit = "b6f37ab7767f428fd6f993de5e211643d47d4deb",
-    patches = ["//third_party/xla:xla_python_3_12.patch"],
+    commit = "a98e42b8b195e578a97025654f4e7b9b3fb5001a",
     patch_strip = 1,
+    patches = [
+        "//:third_party/xla/future_sfinae.patch",
+    ],
+    remote = "https://github.com/openxla/xla.git",
 )
 
 bazel_dep(name = "rules_python", version = "1.8.5")
@@ -33,10 +34,10 @@ single_version_override(
     module_name = "rules_python",
     patch_strip = 1,
     patches = [
-        "//third_party/py:rules_python_pip_version.patch",
-        "//third_party/py:rules_python_freethreaded.patch",
-        "//third_party/py:rules_python_versions.patch",
-        "//third_party/py:rules_python_scope.patch",
+        "//:third_party/py/rules_python_pip_version.patch",
+        "//:third_party/py/rules_python_freethreaded.patch",
+        "//:third_party/py/rules_python_versions.patch",
+        "//:third_party/py/rules_python_scope.patch",
     ],
     version = "1.8.5",
 )
@@ -45,15 +46,10 @@ bazel_dep(name = "grpc", version = "1.78.0", repo_name = "com_github_grpc_grpc")
 single_version_override(
     module_name = "grpc",
     patch_strip = 1,
-    patches = ["//third_party/grpc:grpc.patch"],
+    patches = [
+        "//:third_party/grpc/grpc.patch",
+    ],
     version = "1.78.0",
-)
-
-bazel_dep(name = "curl", version = "8.11.0")
-single_version_override(
-    module_name = "curl",
-    patches = ["//third_party/curl:remove_linker_script.patch"],
-    version = "8.11.0",
 )
 
 third_party = use_extension("@xla//third_party/extensions:third_party.bzl", "third_party_ext")
@@ -73,6 +69,8 @@ jax_python_wheel_repository = use_repo_rule(
 )
 
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
+bazel_dep(name = "nanobind_bazel", version = "2.12.0")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_google_googletest")
 
 pybind11_internal_configure = use_extension(
     "@pybind11_bazel//:internal_configure.bzl",
@@ -95,3 +93,11 @@ python.toolchain(python_version = "3.11")
 python.toolchain(python_version = "3.12")
 python.toolchain(python_version = "3.13")
 python.toolchain(python_version = "3.14")
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+use_repo(pip, pypi = "jax_pypi")
+
+override_repo(
+    pip,
+    xla_pypi = "pypi",
+)

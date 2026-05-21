@@ -120,7 +120,7 @@ py_test(
     deps = [
         ":kv_cache_manager",
         "//learning/brain/research/jax:tpu_support",
-        "//raiden_lib/raw_transfer",
+        "//raiden_lib/raw_transfer/jax:raw_transfer",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
         "@jax//jax",
@@ -143,7 +143,7 @@ py_test(
     deps = [
         ":kv_cache_manager",
         "//learning/brain/research/jax:tpu_support",
-        "//raiden_lib/raw_transfer",
+        "//raiden_lib/raw_transfer/jax:raw_transfer",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
         "@jax//jax",

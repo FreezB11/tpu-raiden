@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-#if __has_include("absl/status/status.h")
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "xla/future.h"
@@ -35,19 +34,6 @@
 #include "xla/pjrt/raw_buffer.h"
 #include "xla/shape_util.h"
 #include "xla/tsl/concurrency/ref_count.h"
-#else
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
-#include "xla/future.h"
-#include "xla/pjrt/abstract_tracked_device_buffer.h"
-#include "xla/pjrt/c/pjrt_c_api_raw_buffer_external.h"
-#include "xla/pjrt/c_api_client/pjrt_c_api_client.h"
-#include "xla/pjrt/pjrt_client.h"
-#include "xla/pjrt/pjrt_layout.h"
-#include "xla/pjrt/raw_buffer.h"
-#include "xla/shape_util.h"
-#include "xla/tsl/concurrency/ref_count.h"
-#endif
 
 namespace raiden {
 

@@ -19,17 +19,28 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 DEFAULT_WORKSPACE_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="${WORKSPACE_DIR:-${DEFAULT_WORKSPACE_DIR}}"
-BAZEL_DISK_CACHE="${BAZEL_CACHE_DIR:-/mnt/disks/jcgu/bazel_cache/disk_cache}"
-BAZEL_REPO_CACHE="${BAZEL_CACHE_DIR:-/mnt/disks/jcgu/bazel_cache/repo_cache}"
+BAZEL_CACHE_BASE="${BAZEL_CACHE_DIR:-${HOME}/.bazel_cache}"
+BAZEL_DISK_CACHE="${BAZEL_CACHE_BASE}/disk_cache"
+BAZEL_REPO_CACHE="${BAZEL_CACHE_BASE}/repo_cache"
 
 echo "=== Navigating to workspace directory ==="
 cd "${WORKSPACE_DIR}"
 
-echo "=== Building raw_transfer with Bazel ==="
-bazel build -c opt --check_visibility=false //raw_transfer:raw_transfer_binaries --disk_cache=${BAZEL_DISK_CACHE} --repository_cache=${BAZEL_REPO_CACHE}
+echo "=== Building raw_transfer and kv_cache_manager with Bazel ==="
+bazel build -c opt --check_visibility=false --verbose_failures --experimental_repo_remote_exec --incompatible_disallow_empty_glob=false \
+  //raiden_lib/raw_transfer/jax:raw_transfer \
+  //kv_cache:kv_cache_manager \
+  --disk_cache=${BAZEL_DISK_CACHE} \
+  --repository_cache=${BAZEL_REPO_CACHE}
+
+
+echo "=== Copying compiled shared libraries to source directory ==="
+cp -f "${WORKSPACE_DIR}/bazel-bin/raiden_lib/raw_transfer/jax/raw_transfer.so" "${WORKSPACE_DIR}/raiden_lib/raw_transfer/jax/"
+cp -f "${WORKSPACE_DIR}/bazel-bin/kv_cache/kv_cache_manager.so" "${WORKSPACE_DIR}/kv_cache/"
+
 
 echo "=== Build Complete! ==="
-echo "Artifacts are located in: ${WORKSPACE_DIR}/bazel-bin/raw_transfer/"
+echo "Artifacts are located in: ${WORKSPACE_DIR}/bazel-bin/raiden_lib/raw_transfer/jax/"
 
 echo "=== Install Python Dependencies! ==="
 pip install -r requirements.txt

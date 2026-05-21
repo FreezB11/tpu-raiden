@@ -18,14 +18,13 @@ set -e
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
-# Point to the directory containing the compiled raw_transfer.so
-export PYTHONPATH="${WORKSPACE_DIR}/bazel-bin/raw_transfer:${PYTHONPATH}"
+# Point to the directory containing the compiled raw_transfer.so and source files
+# We also include the workspace parent dir to map absolute 'google3.third_party...' python imports!
+export PYTHONPATH="${WORKSPACE_DIR}:${WORKSPACE_DIR}/bazel-bin:${PYTHONPATH}"
+
 
 # Change to the tests directory to avoid Python's local directory import shadowing
-cd "${WORKSPACE_DIR}/raw_transfer"
+cd "${WORKSPACE_DIR}/raiden_lib/raw_transfer/jax"
 
-echo "=== Running: test_import.py ==="
-python test_import.py 2>&1 | tee "${WORKSPACE_DIR}/import.log"
-
-echo "=== Running: test_raw_transfer_perf.py ==="
-python test_raw_transfer_perf.py 2>&1 | tee "${WORKSPACE_DIR}/perf_test.log"
+echo "=== Running: raw_transfer_test.py ==="
+python raw_transfer_test.py 2>&1 | tee "${WORKSPACE_DIR}/test.log"

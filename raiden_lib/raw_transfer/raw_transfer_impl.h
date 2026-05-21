@@ -21,14 +21,6 @@
 #include <typeinfo>
 #include <vector>
 
-#if __has_include( \
-    "raiden_lib/raw_transfer/raw_transfer_core.h")
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
-#elif __has_include("raiden_lib/raw_transfer/raw_transfer_core.h")
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
-#else
-#include "raw_transfer_core.h"
-#endif
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include <nanobind/nanobind.h>
@@ -42,15 +34,26 @@
 #include "xla/pjrt/raw_buffer.h"
 #include "xla/pjrt/status_casters.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/client.h"
 #include "xla/python/pjrt_ifrt/pjrt_array.h"
 #include "xla/shape_util.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/logging.h"
 #include "xla/tsl/platform/statusor.h"
+#include "raiden_lib/raw_transfer/raw_transfer_core.h"
 
 namespace nb = nanobind;
 
 namespace jax {
+
+inline xla::ifrt::PjRtCompatibleArray* CastToPjRtCompatibleArray(
+    xla::ifrt::Array* ifrt_array) {
+  if (ifrt_array == nullptr) return nullptr;
+  if (ifrt_array->client()->runtime_type() == "pjrt_ifrt") {
+    return static_cast<xla::ifrt::PjRtCompatibleArray*>(ifrt_array);
+  }
+  return nullptr;
+}
 
 struct PyArrayObject {
   PyObject_HEAD;
@@ -76,8 +79,7 @@ inline xla::PjRtBuffer* GetPjrtBufferFromPyObject(PyObject* obj) {
   auto* storage = GetPyArrayStorageFromObject(py_array_obj);
   xla::ifrt::Array* ifrt_array = storage->ifrt_array.get();
 
-  auto* arr =
-      llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(ifrt_array);
+  auto* arr = CastToPjRtCompatibleArray(ifrt_array);
   if (arr == nullptr) {
     throw std::runtime_error("Not a PjRt compatible array");
   }
@@ -391,12 +393,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_d2h_batch_async_impl(
         xla::ifrt::Array* dst_ifrt_array =
             jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-        auto* src_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                src_ifrt_array);
-        auto* dst_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                dst_ifrt_array);
+        auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+        auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
         if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
           throw std::runtime_error("Not a PjRt compatible array");
@@ -455,12 +453,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_d2h_batch_async_impl(
         xla::ifrt::Array* dst_ifrt_array =
             jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-        auto* src_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                src_ifrt_array);
-        auto* dst_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                dst_ifrt_array);
+        auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+        auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
         if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
           throw std::runtime_error("Not a PjRt compatible array");
@@ -543,10 +537,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_d2h_batch_async_impl(
     xla::ifrt::Array* src_ifrt_array = jax::GetIfrtArrayFromPyObject(src.ptr());
     xla::ifrt::Array* dst_ifrt_array = jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-    auto* src_compat_arr =
-        llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(src_ifrt_array);
-    auto* dst_compat_arr =
-        llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(dst_ifrt_array);
+    auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+    auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
     if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
       throw std::runtime_error("Not a PjRt compatible array");
@@ -956,12 +948,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_h2d_batch_async_impl(
         xla::ifrt::Array* dst_ifrt_array =
             jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-        auto* src_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                src_ifrt_array);
-        auto* dst_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                dst_ifrt_array);
+        auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+        auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
         if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
           throw std::runtime_error("Not a PjRt compatible array");
@@ -1030,12 +1018,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_h2d_batch_async_impl(
         xla::ifrt::Array* dst_ifrt_array =
             jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-        auto* src_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                src_ifrt_array);
-        auto* dst_compat_arr =
-            llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(
-                dst_ifrt_array);
+        auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+        auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
         if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
           throw std::runtime_error("Not a PjRt compatible array");
@@ -1124,10 +1108,8 @@ inline absl::StatusOr<PjRtCopyFuture> transfer_h2d_batch_async_impl(
     xla::ifrt::Array* src_ifrt_array = jax::GetIfrtArrayFromPyObject(src.ptr());
     xla::ifrt::Array* dst_ifrt_array = jax::GetIfrtArrayFromPyObject(dst.ptr());
 
-    auto* src_compat_arr =
-        llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(src_ifrt_array);
-    auto* dst_compat_arr =
-        llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(dst_ifrt_array);
+    auto* src_compat_arr = jax::CastToPjRtCompatibleArray(src_ifrt_array);
+    auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
     if (src_compat_arr == nullptr || dst_compat_arr == nullptr) {
       throw std::runtime_error("Not a PjRt compatible array");

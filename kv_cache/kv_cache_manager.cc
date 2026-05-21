@@ -467,8 +467,11 @@ KVCacheManager::KVCacheManager(nb::list device_arrays, int block_size,
   for (size_t layer_idx = 0; layer_idx < num_layers_; ++layer_idx) {
     nb::object dst = (*device_arrays_)[layer_idx];
     xla::ifrt::Array* dst_ifrt_array = jax::GetIfrtArrayFromPyObject(dst.ptr());
-    auto* dst_compat_arr =
-        llvm::dyn_cast_or_null<xla::ifrt::PjRtCompatibleArray>(dst_ifrt_array);
+
+    // Statically resolve the underlying dynamic IFRT array reference into
+    // its PJRT-compatible structure using JAX static API cast hooks. This
+    // isolates compiler templates target overrides under BCR Bazel layouts.
+    auto* dst_compat_arr = jax::CastToPjRtCompatibleArray(dst_ifrt_array);
 
     if (dst_compat_arr == nullptr) {
       throw std::runtime_error("Not a PjRt compatible array");

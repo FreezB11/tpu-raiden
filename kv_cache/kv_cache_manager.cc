@@ -216,7 +216,7 @@ struct KVCacheManager::BlockTransportServer {
         t.join();
       }
     }
-    absl::MutexLock _(&conn_mu_);
+    absl::MutexLock _(conn_mu_);
     for (const auto& [peer, fd] : connection_pool_) {
       close(fd);
     }
@@ -224,7 +224,7 @@ struct KVCacheManager::BlockTransportServer {
 
   absl::StatusOr<int> GetOrCreateConnection(const std::string& peer) {
     {
-      absl::MutexLock _(&conn_mu_);
+      absl::MutexLock _(conn_mu_);
       auto it = connection_pool_.find(peer);
       if (it != connection_pool_.end()) {
         return it->second;
@@ -272,7 +272,7 @@ struct KVCacheManager::BlockTransportServer {
 
     freeaddrinfo(result);
 
-    absl::MutexLock _(&conn_mu_);
+    absl::MutexLock _(conn_mu_);
     connection_pool_[peer] = sock_fd;
     return sock_fd;
   }

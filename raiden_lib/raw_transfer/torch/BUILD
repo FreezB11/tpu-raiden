@@ -13,8 +13,7 @@
 # limitations under the License.
 
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
-load("@rules_python//python:defs.bzl", "py_test")
-load("//devtools/python/blaze:strict.bzl", "py_strict_library")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -55,7 +54,7 @@ nanobind_extension(
     ],
 )
 
-py_strict_library(
+py_library(
     name = "torch_raw_transfer",
     srcs = ["torch_raw_transfer.py"],
     deps = [

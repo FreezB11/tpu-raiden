@@ -73,10 +73,12 @@ cc_library(
     ],
 )
 
-nanobind_extension(
-    name = "kv_cache_manager",
+cc_library(
+    name = "kv_cache_manager_lib",
     srcs = [
         "kv_cache_manager.cc",
+    ],
+    hdrs = [
         "kv_cache_manager.h",
     ],
     copts = [
@@ -102,6 +104,49 @@ nanobind_extension(
         "@xla//xla/stream_executor:stream",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
+    ],
+)
+
+nanobind_extension(
+    name = "kv_cache_manager",
+    srcs = [
+        "kv_cache_manager_pybind.cc",
+    ],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = ["-use_header_modules"],
+    deps = [
+        ":kv_cache_manager_lib",
+        "@nanobind",
+        "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt:status_casters",
+        "@xla//xla/pjrt/c_api_client:pjrt_c_api_client",
+        "@xla//xla/tsl/platform:errors",
+    ],
+)
+
+nanobind_extension(
+    name = "kv_cache_store",
+    srcs = [
+        "kv_cache_store.cc",
+        "kv_cache_store.h",
+    ],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = ["-use_header_modules"],
+    deps = [
+        ":kv_cache_manager_lib",
+        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@nanobind",
+        "@xla//xla/pjrt:status_casters",
     ],
 )
 

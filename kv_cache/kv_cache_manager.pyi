@@ -6,7 +6,8 @@ class KVCacheManager:
       device_arrays: list[Any],
       block_size: int = 1,
       local_port: int | None = None,
-      host_blocks_to_allocate: int = 64,
+      host_blocks_to_allocate: int | None = None,
+      external_host_ptrs: list[int] | None = None,
       unsafe_skip_buffer_lock: bool = False,
       parallelism: int = 1,
   ) -> None: ...

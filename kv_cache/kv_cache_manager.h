@@ -43,7 +43,9 @@ class KVCacheManager {
   // memory access holds, and physical slice dimensions.
   KVCacheManager(nanobind::list device_arrays, int block_size = 1,
                  std::optional<int> local_port = std::nullopt,
-                 int host_blocks_to_allocate = 64,
+                 std::optional<int> host_blocks_to_allocate = std::nullopt,
+                 std::optional<std::vector<const uint8_t*>> external_host_ptrs =
+                     std::nullopt,
                  bool unsafe_skip_buffer_lock = false, int parallelism = 1);
 
   // Overloaded constructor for pure-CPU Host allocations (bypassing JAX and
@@ -61,9 +63,9 @@ class KVCacheManager {
   // Asynchronously copies chunks from host arrays to device arrays.
   // Returns a handle (raiden::PjRtCopyFuture) to await completion.
   absl::StatusOr<raiden::PjRtCopyFuture> H2d(
-      nanobind::list src_offsets_major_dim = nanobind::list(),
-      nanobind::list dst_offsets_major_dim = nanobind::list(),
-      nanobind::list copy_sizes_major_dim = nanobind::list());
+      const std::vector<int64_t>& src_offsets_major_dim = {},
+      const std::vector<int64_t>& dst_offsets_major_dim = {},
+      const std::vector<int64_t>& copy_sizes_major_dim = {});
 
   // Overloaded H2d accepting standard C++ vectors directly
   __attribute__((visibility("default"))) absl::StatusOr<raiden::PjRtCopyFuture>
@@ -82,9 +84,9 @@ class KVCacheManager {
   // Asynchronously copies chunks from device arrays to host arrays.
   // Returns a handle (raiden::PjRtCopyFuture) to await completion.
   absl::StatusOr<raiden::PjRtCopyFuture> D2h(
-      nanobind::list src_offsets_major_dim = nanobind::list(),
-      nanobind::list dst_offsets_major_dim = nanobind::list(),
-      nanobind::list copy_sizes_major_dim = nanobind::list());
+      const std::vector<int64_t>& src_offsets_major_dim = {},
+      const std::vector<int64_t>& dst_offsets_major_dim = {},
+      const std::vector<int64_t>& copy_sizes_major_dim = {});
 
   // Overloaded D2h accepting standard C++ vectors directly
   __attribute__((visibility("default"))) absl::StatusOr<raiden::PjRtCopyFuture>
@@ -105,18 +107,18 @@ class KVCacheManager {
   // Returns a pair containing the vector of allocated block IDs and the future
   // handle to await completion.
   absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>>
-  D2hAutoAllocate(nanobind::list src_offsets_major_dim = nanobind::list(),
-                  nanobind::list copy_sizes_major_dim = nanobind::list(),
+  D2hAutoAllocate(const std::vector<int64_t>& src_offsets_major_dim = {},
+                  const std::vector<int64_t>& copy_sizes_major_dim = {},
                   int64_t entity_id = 0);
 
   // Direct C++ H2H network write (Push)
   absl::StatusOr<std::vector<int>> H2hWriteDirect(
-      const std::string& peer, const std::vector<int32_t>& src_block_ids,
+      const std::string& peer, const std::vector<int>& src_block_ids,
       int64_t entity_id = 0);
 
   // Direct C++ H2H network read (Pull)
   absl::StatusOr<std::vector<int>> H2hReadDirect(
-      const std::string& peer, const std::vector<int32_t>& src_block_ids,
+      const std::string& peer, const std::vector<int>& src_block_ids,
       int64_t entity_id = 0);
 
   // Pushes logical block chunks symmetrically across all layers over network
@@ -125,7 +127,8 @@ class KVCacheManager {
   // allocated target remote block IDs and the future handle to await local push
   // completion.
   absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>> H2hWrite(
-      std::string peer, nanobind::list src_block_ids, int64_t entity_id = 0);
+      std::string peer, const std::vector<int>& src_block_ids,
+      int64_t entity_id = 0);
 
   // Pulls logical block chunks symmetrically across all layers from a remote
   // KVCacheManager peer over network streams directly into corresponding local
@@ -133,7 +136,8 @@ class KVCacheManager {
   // successfully allocated local block IDs and the future handle to await
   // network pull completion.
   absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>> H2hRead(
-      std::string peer, nanobind::list src_block_ids, int64_t entity_id = 0);
+      std::string peer, const std::vector<int>& src_block_ids,
+      int64_t entity_id = 0);
 
   // Returns the local listening port of the internal transport server if
   // enabled.
@@ -142,6 +146,16 @@ class KVCacheManager {
   // Returns the allocated host memory virtual pointer address for a given layer
   // and shard.
   const uint8_t* GetHostPointer(size_t layer_idx, size_t shard_idx) const;
+
+  void SetExternalHostBuffer(
+      const std::vector<raiden::BufferHoldAndAlias>& buffer_holds);
+
+  void SetExternalHostPointers(const std::vector<const uint8_t*>& host_ptrs,
+                               const std::vector<size_t>& host_sizes);
+
+  size_t num_layers() const { return num_layers_; }
+  size_t num_shards() const { return num_shards_; }
+  size_t slice_byte_size() const { return slice_byte_size_; }
 
  private:
   struct ShardBufferInfo : public raiden::BufferHoldAndAlias {
@@ -186,7 +200,7 @@ class KVCacheManager {
 
   void H2hWriteWorker(int stream_idx, const std::string& peer,
                       size_t blocks_per_stream,
-                      const nanobind::list& src_block_ids,
+                      const std::vector<int>& src_block_ids,
                       std::vector<int>& allocated_ids,
                       std::vector<absl::Status>& statuses);
 

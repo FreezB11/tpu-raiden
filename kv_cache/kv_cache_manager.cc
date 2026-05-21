@@ -45,7 +45,9 @@
 #include "absl/synchronization/mutex.h"
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 #include "xla/pjrt/c_api_client/pjrt_c_api_client.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/status_casters.h"
@@ -397,12 +399,12 @@ struct KVCacheManager::BlockTransportServer {
   std::vector<std::thread> worker_threads_;
 };
 
-KVCacheManager::KVCacheManager(nb::list device_arrays, int block_size,
-                               std::optional<int> local_port,
-                               int host_blocks_to_allocate,
-                               bool unsafe_skip_buffer_lock, int parallelism)
-    : device_arrays_(std::move(device_arrays)),
-      parallelism_(parallelism) {
+KVCacheManager::KVCacheManager(
+    nb::list device_arrays, int block_size, std::optional<int> local_port,
+    std::optional<int> host_blocks_to_allocate,
+    std::optional<std::vector<const uint8_t*>> external_host_ptrs,
+    bool unsafe_skip_buffer_lock, int parallelism)
+    : device_arrays_(std::move(device_arrays)), parallelism_(parallelism) {
   num_layers_ = nb::len(*device_arrays_);
 
   if (num_layers_ == 0) {
@@ -462,7 +464,20 @@ KVCacheManager::KVCacheManager(nb::list device_arrays, int block_size,
     block_manager_ = std::make_unique<LogicalBlockManager>(total_blocks);
   }
 
+  int total_blocks = major_dim_size_ / block_size_;
+  int num_host_blocks = 64;
+  if (host_blocks_to_allocate.has_value()) {
+    num_host_blocks = host_blocks_to_allocate.value();
+    if (num_host_blocks < 0) {
+      throw std::invalid_argument(
+          "host_blocks_to_allocate must be non-negative");
+    }
+  } else if (external_host_ptrs.has_value()) {
+    num_host_blocks = total_blocks;
+  }
+
   // Extract all layer and shard pointers
+  size_t shard_idx = 0;
   layers_.reserve(num_layers_);
   for (size_t layer_idx = 0; layer_idx < num_layers_; ++layer_idx) {
     nb::object dst = (*device_arrays_)[layer_idx];
@@ -495,24 +510,31 @@ KVCacheManager::KVCacheManager(nb::list device_arrays, int block_size,
             "Device buffer shard size smaller than expected physical size");
       }
 
-      int num_host_blocks = host_blocks_to_allocate;
-      if (num_host_blocks < 0) {
-        throw std::invalid_argument(
-            "host_blocks_to_allocate must be non-negative");
-      }
       size_t alloc_size = num_host_blocks * block_size_ * slice_byte_size_;
-      void* ptr = nullptr;
-      if (alloc_size > 0) {
-        if (posix_memalign(&ptr, 64, alloc_size) != 0) {
-          throw std::runtime_error("Failed to allocate host buffer");
+      if (external_host_ptrs.has_value()) {
+        if (shard_idx < external_host_ptrs->size()) {
+          shard_info.host_ptr = (*external_host_ptrs)[shard_idx];
+        } else {
+          throw std::invalid_argument(
+              "Number of external host pointers is less than num_layers * "
+              "num_shards");
         }
-        std::memset(ptr, 0, alloc_size);
+        shard_info.host_size = alloc_size;
+        shard_idx++;
+      } else {
+        void* ptr = nullptr;
+        if (alloc_size > 0) {
+          if (posix_memalign(&ptr, 64, alloc_size) != 0) {
+            throw std::runtime_error("Failed to allocate host buffer");
+          }
+          std::memset(ptr, 0, alloc_size);
+        }
+        shard_info.owned_host_buffer =
+            std::unique_ptr<uint8_t[], void (*)(void*)>(
+                static_cast<uint8_t*>(ptr), [](void* p) { free(p); });
+        shard_info.host_ptr = shard_info.owned_host_buffer.get();
+        shard_info.host_size = alloc_size;
       }
-      shard_info.owned_host_buffer =
-          std::unique_ptr<uint8_t[], void (*)(void*)>(
-              static_cast<uint8_t*>(ptr), [](void* p) { free(p); });
-      shard_info.host_ptr = shard_info.owned_host_buffer.get();
-      shard_info.host_size = alloc_size;
 
       auto status_or_hold = raiden::BufferHoldAndAlias::Acquire(
           dst_buffer, c_api_, extension_, unsafe_skip_buffer_lock);
@@ -599,9 +621,10 @@ const uint8_t* KVCacheManager::GetHostPointer(size_t layer_idx,
 KVCacheManager::~KVCacheManager() = default;
 
 absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::H2d(
-    nb::list src_offsets_major_dim, nb::list dst_offsets_major_dim,
-    nb::list copy_sizes_major_dim) {
-  bool is_partial = (src_offsets_major_dim.size() > 0);
+    const std::vector<int64_t>& src_offsets_major_dim,
+    const std::vector<int64_t>& dst_offsets_major_dim,
+    const std::vector<int64_t>& copy_sizes_major_dim) {
+  bool is_partial = !src_offsets_major_dim.empty();
   if (is_partial) {
     if (src_offsets_major_dim.size() != dst_offsets_major_dim.size() ||
         src_offsets_major_dim.size() != copy_sizes_major_dim.size()) {
@@ -627,11 +650,9 @@ absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::H2d(
         shard_futures.push_back(std::move(future));
       } else {
         for (size_t j = 0; j < src_offsets_major_dim.size(); ++j) {
-          int64_t src_major_dim_offset =
-              nb::cast<int64_t>(src_offsets_major_dim[j]);
-          int64_t dst_major_dim_offset =
-              nb::cast<int64_t>(dst_offsets_major_dim[j]);
-          int64_t major_dim_size = nb::cast<int64_t>(copy_sizes_major_dim[j]);
+          int64_t src_major_dim_offset = src_offsets_major_dim[j];
+          int64_t dst_major_dim_offset = dst_offsets_major_dim[j];
+          int64_t major_dim_size = copy_sizes_major_dim[j];
 
           int64_t src_offset = src_major_dim_offset * slice_byte_size_;
           int64_t dst_offset = dst_major_dim_offset * slice_byte_size_;
@@ -720,8 +741,9 @@ absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::DispatchD2hChunks(
 }
 
 absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::D2h(
-    nb::list src_offsets_major_dim, nb::list dst_offsets_major_dim,
-    nb::list copy_sizes_major_dim) {
+    const std::vector<int64_t>& src_offsets_major_dim,
+    const std::vector<int64_t>& dst_offsets_major_dim,
+    const std::vector<int64_t>& copy_sizes_major_dim) {
   size_t num_chunks = src_offsets_major_dim.size();
   if (num_chunks != dst_offsets_major_dim.size() ||
       num_chunks != copy_sizes_major_dim.size()) {
@@ -729,26 +751,14 @@ absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::D2h(
         "Lengths of offset and size lists must match");
   }
 
-  std::vector<int64_t> src_offsets;
-  std::vector<int64_t> dst_offsets;
-  std::vector<int64_t> copy_sizes;
-  src_offsets.reserve(num_chunks);
-  dst_offsets.reserve(num_chunks);
-  copy_sizes.reserve(num_chunks);
-
-  for (size_t j = 0; j < num_chunks; ++j) {
-    src_offsets.push_back(nb::cast<int64_t>(src_offsets_major_dim[j]));
-    dst_offsets.push_back(nb::cast<int64_t>(dst_offsets_major_dim[j]));
-    copy_sizes.push_back(nb::cast<int64_t>(copy_sizes_major_dim[j]));
-  }
-
-  return DispatchD2hChunks(src_offsets, dst_offsets, copy_sizes);
+  return DispatchD2hChunks(src_offsets_major_dim, dst_offsets_major_dim,
+                           copy_sizes_major_dim);
 }
 
 absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>>
-KVCacheManager::D2hAutoAllocate(nb::list src_offsets_major_dim,
-                                nb::list copy_sizes_major_dim,
-                                int64_t entity_id) {
+KVCacheManager::D2hAutoAllocate(
+    const std::vector<int64_t>& src_offsets_major_dim,
+    const std::vector<int64_t>& copy_sizes_major_dim, int64_t entity_id) {
   size_t num_chunks = src_offsets_major_dim.size();
   if (num_chunks != copy_sizes_major_dim.size()) {
     return absl::InvalidArgumentError(
@@ -764,7 +774,7 @@ KVCacheManager::D2hAutoAllocate(nb::list src_offsets_major_dim,
   blocks_per_chunk.reserve(num_chunks);
 
   for (size_t j = 0; j < num_chunks; ++j) {
-    int64_t copy_size = nb::cast<int64_t>(copy_sizes_major_dim[j]);
+    int64_t copy_size = copy_sizes_major_dim[j];
     if (copy_size % block_size_ != 0) {
       return absl::InvalidArgumentError(
           "Copy size must be a multiple of block size");
@@ -787,7 +797,7 @@ KVCacheManager::D2hAutoAllocate(nb::list src_offsets_major_dim,
 
   size_t block_id_idx = 0;
   for (size_t j = 0; j < num_chunks; ++j) {
-    int64_t src_major_dim_offset = nb::cast<int64_t>(src_offsets_major_dim[j]);
+    int64_t src_major_dim_offset = src_offsets_major_dim[j];
     int needed = blocks_per_chunk[j];
 
     for (int k = 0; k < needed; ++k) {
@@ -811,9 +821,10 @@ std::optional<int> KVCacheManager::local_port() const {
 }
 
 absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>>
-KVCacheManager::H2hWrite(std::string peer, nb::list src_block_ids,
+KVCacheManager::H2hWrite(std::string peer,
+                         const std::vector<int>& src_block_ids,
                          int64_t entity_id) {
-  size_t num_blocks = nb::len(src_block_ids);
+  size_t num_blocks = src_block_ids.size();
   if (num_blocks == 0) {
     return absl::InvalidArgumentError("Block list cannot be empty");
   }
@@ -822,8 +833,9 @@ KVCacheManager::H2hWrite(std::string peer, nb::list src_block_ids,
   if (static_cast<int>(num_blocks) < P) P = num_blocks;
 
   if (num_blocks % P != 0) {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "Block count (", num_blocks, ") must be fully divisible by parallelism (", P, ")"));
+    return absl::InvalidArgumentError(
+        absl::StrCat("Block count (", num_blocks,
+                     ") must be fully divisible by parallelism (", P, ")"));
   }
 
   size_t blocks_per_stream = num_blocks / P;
@@ -852,7 +864,7 @@ KVCacheManager::H2hWrite(std::string peer, nb::list src_block_ids,
 
 void KVCacheManager::H2hWriteWorker(int stream_idx, const std::string& peer,
                                     size_t blocks_per_stream,
-                                    const nb::list& src_block_ids,
+                                    const std::vector<int>& src_block_ids,
                                     std::vector<int>& allocated_ids,
                                     std::vector<absl::Status>& statuses) {
   size_t offset = stream_idx * blocks_per_stream;
@@ -899,7 +911,7 @@ void KVCacheManager::H2hWriteWorker(int stream_idx, const std::string& peer,
       const uint8_t* base_host_ptr = shard_info.host_ptr;
 
       for (size_t k = 0; k < blocks_per_stream; ++k) {
-        int src_id = nb::cast<int>(src_block_ids[offset + k]);
+        int src_id = src_block_ids[offset + k];
         const uint8_t* src_ptr = base_host_ptr + src_id * bytes_per_block;
         s = WriteExact(fd, src_ptr, bytes_per_block);
         if (!s.ok()) {
@@ -920,9 +932,9 @@ void KVCacheManager::H2hWriteWorker(int stream_idx, const std::string& peer,
 }
 
 absl::StatusOr<std::pair<std::vector<int>, raiden::PjRtCopyFuture>>
-KVCacheManager::H2hRead(std::string peer, nb::list src_block_ids,
+KVCacheManager::H2hRead(std::string peer, const std::vector<int>& src_block_ids,
                         int64_t entity_id) {
-  size_t num_blocks = nb::len(src_block_ids);
+  size_t num_blocks = src_block_ids.size();
   if (num_blocks == 0) {
     return absl::InvalidArgumentError("Block list cannot be empty");
   }
@@ -935,13 +947,14 @@ KVCacheManager::H2hRead(std::string peer, nb::list src_block_ids,
   if (static_cast<int>(local_blocks) < P) P = local_blocks;
 
   if (local_blocks % P != 0) {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "Local block count (", local_blocks, ") must be fully divisible by parallelism (", P, ")"));
+    return absl::InvalidArgumentError(
+        absl::StrCat("Local block count (", local_blocks,
+                     ") must be fully divisible by parallelism (", P, ")"));
   }
 
   size_t blocks_per_stream = local_blocks / P;
   size_t remote_blocks_per_stream = num_blocks / P;
-  int base_remote_id = nb::cast<int>(src_block_ids[0]);
+  int base_remote_id = src_block_ids[0];
 
   std::vector<std::thread> threads;
   std::vector<absl::Status> statuses(P, absl::OkStatus());
@@ -1114,7 +1127,7 @@ absl::Status KVCacheManager::D2hDirect(
 }
 
 absl::StatusOr<std::vector<int>> KVCacheManager::H2hWriteDirect(
-    const std::string& peer, const std::vector<int32_t>& src_block_ids,
+    const std::string& peer, const std::vector<int>& src_block_ids,
     int64_t entity_id) {
   size_t num_blocks = src_block_ids.size();
   if (num_blocks == 0) {
@@ -1130,11 +1143,6 @@ absl::StatusOr<std::vector<int>> KVCacheManager::H2hWriteDirect(
                      ") must be fully divisible by parallelism (", P, ")"));
   }
 
-  nb::list src_block_ids_list;
-  for (int id : src_block_ids) {
-    src_block_ids_list.append(id);
-  }
-
   size_t blocks_per_stream = num_blocks / P;
   std::vector<int> allocated_ids(num_blocks, 0);
   std::vector<std::thread> threads;
@@ -1142,10 +1150,9 @@ absl::StatusOr<std::vector<int>> KVCacheManager::H2hWriteDirect(
 
   threads.reserve(P);
   for (int i = 0; i < P; ++i) {
-    threads.push_back(std::thread(&KVCacheManager::H2hWriteWorker, this, i,
-                                  peer, blocks_per_stream,
-                                  std::ref(src_block_ids_list),
-                                  std::ref(allocated_ids), std::ref(statuses)));
+    threads.push_back(std::thread(
+        &KVCacheManager::H2hWriteWorker, this, i, peer, blocks_per_stream,
+        std::ref(src_block_ids), std::ref(allocated_ids), std::ref(statuses)));
   }
 
   for (auto& t : threads) {
@@ -1160,7 +1167,7 @@ absl::StatusOr<std::vector<int>> KVCacheManager::H2hWriteDirect(
 }
 
 absl::StatusOr<std::vector<int>> KVCacheManager::H2hReadDirect(
-    const std::string& peer, const std::vector<int32_t>& src_block_ids,
+    const std::string& peer, const std::vector<int>& src_block_ids,
     int64_t entity_id) {
   size_t num_blocks = src_block_ids.size();
   if (num_blocks == 0) {
@@ -1178,11 +1185,6 @@ absl::StatusOr<std::vector<int>> KVCacheManager::H2hReadDirect(
     return absl::InvalidArgumentError(
         absl::StrCat("Local block count (", local_blocks,
                      ") must be fully divisible by parallelism (", P, ")"));
-  }
-
-  nb::list src_block_ids_list;
-  for (int id : src_block_ids) {
-    src_block_ids_list.append(id);
   }
 
   size_t blocks_per_stream = local_blocks / P;
@@ -1278,75 +1280,40 @@ absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManager::D2hDirect(
   return DispatchD2hChunks(src_offsets, dst_offsets, copy_sizes, device_id);
 }
 
+void KVCacheManager::SetExternalHostBuffer(
+    const std::vector<raiden::BufferHoldAndAlias>& buffer_holds) {
+  size_t idx = 0;
+  for (size_t l = 0; l < num_layers_; ++l) {
+    for (size_t sh = 0; sh < num_shards_; ++sh) {
+      if (idx < buffer_holds.size()) {
+        auto u_ptr_or = buffer_holds[idx].buffer->client()->UnsafeBufferPointer(
+            buffer_holds[idx].buffer);
+        if (u_ptr_or.ok()) {
+          layers_[l].shards[sh].host_ptr =
+              reinterpret_cast<uint8_t*>(u_ptr_or.value());
+          layers_[l].shards[sh].host_size =
+              buffer_holds[idx].buffer->GetOnDeviceSizeInBytes().value();
+        }
+        idx++;
+      }
+    }
+  }
+}
+
+void KVCacheManager::SetExternalHostPointers(
+    const std::vector<const uint8_t*>& host_ptrs,
+    const std::vector<size_t>& host_sizes) {
+  size_t idx = 0;
+  for (size_t l = 0; l < num_layers_; ++l) {
+    for (size_t sh = 0; sh < num_shards_; ++sh) {
+      if (idx < host_ptrs.size()) {
+        layers_[l].shards[sh].host_ptr = host_ptrs[idx];
+        layers_[l].shards[sh].host_size = host_sizes[idx];
+        idx++;
+      }
+    }
+  }
+}
+
 }  // namespace kv_cache
 }  // namespace tpu_raiden
-
-NB_MODULE(kv_cache_manager, m) {
-  nb::module_::import_(
-      "google3.third_party.tpu_raiden.raiden_lib.raw_transfer.jax.raw_transfer");
-  nb::class_<tpu_raiden::kv_cache::KVCacheManager>(m, "KVCacheManager")
-      .def(nb::init<nb::list, int, std::optional<int>, int, bool, int>(),
-           nb::arg("device_arrays"), nb::arg("block_size") = 1,
-           nb::arg("local_port") = nb::none(),
-           nb::arg("host_blocks_to_allocate") = 64,
-           nb::arg("unsafe_skip_buffer_lock") = false,
-           nb::arg("parallelism") = 1)
-      .def(
-          "h2d",
-          [](tpu_raiden::kv_cache::KVCacheManager& self, nb::list src_offsets,
-             nb::list dst_offsets, nb::list copy_sizes) {
-            return xla::ValueOrThrow(
-                self.H2d(src_offsets, dst_offsets, copy_sizes));
-          },
-          nb::arg("src_offsets_major_dim") = nb::list(),
-          nb::arg("dst_offsets_major_dim") = nb::list(),
-          nb::arg("copy_sizes_major_dim") = nb::list())
-      .def(
-          "d2h",
-          [](tpu_raiden::kv_cache::KVCacheManager& self, nb::list src_offsets,
-             nb::list dst_offsets, nb::list copy_sizes) {
-            return xla::ValueOrThrow(
-                self.D2h(src_offsets, dst_offsets, copy_sizes));
-          },
-          nb::arg("src_offsets_major_dim") = nb::list(),
-          nb::arg("dst_offsets_major_dim") = nb::list(),
-          nb::arg("copy_sizes_major_dim") = nb::list())
-      .def(
-          "d2h_auto_allocate",
-          [](tpu_raiden::kv_cache::KVCacheManager& self, nb::list src_offsets,
-             nb::list copy_sizes, int64_t entity_id) {
-            auto result = xla::ValueOrThrow(
-                self.D2hAutoAllocate(src_offsets, copy_sizes, entity_id));
-            nb::list block_ids_list;
-            for (int id : result.first) {
-              block_ids_list.append(id);
-            }
-            return nb::make_tuple(block_ids_list, std::move(result.second));
-          },
-          nb::arg("src_offsets_major_dim") = nb::list(),
-          nb::arg("copy_sizes_major_dim") = nb::list(),
-          nb::arg("entity_id") = 0)
-      .def(
-          "h2h_write",
-          [](tpu_raiden::kv_cache::KVCacheManager& self, std::string peer,
-             nb::list src_block_ids, int64_t entity_id) {
-            auto result = xla::ValueOrThrow(
-                self.H2hWrite(peer, src_block_ids, entity_id));
-            nb::list ids_list;
-            for (int id : result.first) ids_list.append(id);
-            return nb::make_tuple(ids_list, std::move(result.second));
-          },
-          nb::arg("peer"), nb::arg("src_block_ids"), nb::arg("entity_id") = 0)
-      .def(
-          "h2h_read",
-          [](tpu_raiden::kv_cache::KVCacheManager& self, std::string peer,
-             nb::list src_block_ids, int64_t entity_id) {
-            auto result =
-                xla::ValueOrThrow(self.H2hRead(peer, src_block_ids, entity_id));
-            nb::list ids_list;
-            for (int id : result.first) ids_list.append(id);
-            return nb::make_tuple(ids_list, std::move(result.second));
-          },
-          nb::arg("peer"), nb::arg("src_block_ids"), nb::arg("entity_id") = 0)
-      .def("local_port", &tpu_raiden::kv_cache::KVCacheManager::local_port);
-}

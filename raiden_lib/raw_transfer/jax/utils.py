@@ -33,7 +33,7 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from google3.perftools.accelerators.xprof.api.python import xprof_session
+# JAX-native open-source profiler imports loaded dynamically on export
 
 P = jax.sharding.PartitionSpec
 Mesh = jax.sharding.Mesh
@@ -100,29 +100,18 @@ def _update_sharding_spec(spec, new_rank: int):
 @contextlib.contextmanager
 def xprof_session_manager(dtype):
   """Context manager for XProf session."""
-  capture_xprof = True
-  if capture_xprof:
-    xprof_sess = xprof_session.XprofSession()
-    xprof_sess.start_session(
-        # device_name='ghostlite',
-        # enable_python_tracer=True,
-        # host_trace_level=0,
-        # trace_mode='TRACE_COMPUTE_AND_SYNC',
-        # power_trace_level='POWER_TRACE_NORMAL',
-        # enable_fw_throttle_event=True,
-        # enable_fw_power_level_event=True,
-        # enable_fw_thermal_event=True,
-    )
-  else:
-    xprof_sess = None
+  import os
+  log_dir = f"/mnt/disks/persistent/amylin/tpu-raiden/tb_logs_{dtype}"
+  os.makedirs(log_dir, exist_ok=True)
+  jax.profiler.start_trace(log_dir)
   try:
     yield
   finally:
-    if xprof_sess is not None:
-      url = xprof_sess.end_session_and_get_url()
-      print('*' * 80, '\n')
-      print(f'Pallas ChunkMul XProf URL {dtype}: {url}', '\n')
-      print('*' * 80, '\n')
+    jax.profiler.stop_trace()
+    print("*" * 80)
+    print(f"Hardware trace capture completed successfully! Target metrics logged to {log_dir}")
+    print("Visualize trace metrics natively by executing: tensorboard --logdir=" + log_dir)
+    print("*" * 80)
 
 
 def create_mesh(axis_shapes, axis_names, explicit_axis: bool = False):

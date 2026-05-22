@@ -20,12 +20,12 @@ from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
-from google3.perftools.accelerators.xprof.api.python import traceme
+# JAX-native trace annotations loaded on export
 from raiden_lib.raw_transfer.jax import raw_transfer
 from raiden_lib.raw_transfer.jax import raw_transfer_profiled
 from raiden_lib.raw_transfer.jax import utils
 
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+# os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
 SUPPORTED_DTYPES = {
     jnp.bfloat16: "bf16",
@@ -504,7 +504,7 @@ class RawTransferPerfTest(parameterized.TestCase):
         f"raw_transfer_perf_and_copy_to_dest_{dtype}"
     ):
       for i in range(n_profiles):
-        with traceme.TraceMe(f"transfer_d2h_async_{i}"):
+        with jax.profiler.TraceAnnotation(f"transfer_d2h_async_{i}"):
           all_futures = []
           for j in range(num_layers):
             futures = raw_transfer.transfer_d2h_async(src_arrs[j], dst_arrs[j])
@@ -513,7 +513,7 @@ class RawTransferPerfTest(parameterized.TestCase):
             f.Await()
 
       for i in range(n_profiles):
-        with traceme.TraceMe(f"transfer_h2d_async_{i}"):
+        with jax.profiler.TraceAnnotation(f"transfer_h2d_async_{i}"):
           all_futures = []
           for j in range(num_layers):
             futures = raw_transfer.transfer_h2d_async(
@@ -852,6 +852,6 @@ class RawTransferPerfTest(parameterized.TestCase):
 if __name__ == "__main__":
   import sys
 
-  sys.argv.append("--pjrt_tpu_track_event_dependencies=false")
-  sys.argv.append("--jax_max_inflight_async_computations=64")
+  # sys.argv.append("--pjrt_tpu_track_event_dependencies=false")
+  # sys.argv.append("--jax_max_inflight_async_computations=64")
   absltest.main()

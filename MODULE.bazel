@@ -34,10 +34,7 @@ single_version_override(
     module_name = "rules_python",
     patch_strip = 1,
     patches = [
-        "//:third_party/py/rules_python_pip_version.patch",
-        "//:third_party/py/rules_python_freethreaded.patch",
-        "//:third_party/py/rules_python_versions.patch",
-        "//:third_party/py/rules_python_scope.patch",
+        "//:third_party/py/rules_python_missing_version_safe.patch",
     ],
     version = "1.8.5",
 )

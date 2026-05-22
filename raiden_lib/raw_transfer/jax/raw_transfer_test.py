@@ -22,7 +22,7 @@ import numpy as np
 
 from raiden_lib.raw_transfer.jax import raw_transfer
 
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+# os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
 SUPPORTED_DTYPES = {
     jnp.float8_e4m3fn: "fp8",

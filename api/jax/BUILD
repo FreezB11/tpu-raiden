@@ -36,6 +36,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//kv_cache:kv_cache_manager_base",
+        "//raiden_lib/raw_transfer:raw_transfer_impl",
         "@nanobind",
         "@xla//xla/pjrt:pjrt_client",
     ],

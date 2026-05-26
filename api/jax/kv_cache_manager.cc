@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "xla/pjrt/pjrt_client.h"
+#include "raiden_lib/raw_transfer/raw_transfer_impl.h"
 
 namespace nb = nanobind;
 

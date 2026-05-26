@@ -86,7 +86,9 @@ WeightSynchronizerBase::WeightSynchronizerBase(
 
       // Since weight sync acts on the entire buffer, the host size maps exactly
       // to the physical size!
-      size_t alloc_size = physical_size_;
+      size_t alloc_size =
+          physical_size_ +
+          256 * 1024;  // add 256KB scratch pad for resharding pulls
       if (external_host_ptrs.has_value()) {
         if (shard_idx < external_host_ptrs->size()) {
           shard_info.host_ptr = (*external_host_ptrs)[shard_idx];
@@ -184,6 +186,33 @@ absl::StatusOr<raiden::PjRtCopyFuture> WeightSynchronizerBase::H2d() {
       acc.Append(std::move(shard_futures), shard_hold);
     }
   }
+  return acc;
+}
+
+absl::StatusOr<raiden::PjRtCopyFuture> WeightSynchronizerBase::H2dChunk(
+    size_t shard_idx, size_t host_offset_bytes, size_t device_offset_bytes,
+    size_t size_bytes) {
+  if (buffer_holds_.empty()) {
+    return raiden::PjRtCopyFuture({});
+  }
+  if (shard_idx >= num_shards_) {
+    return absl::InvalidArgumentError("Invalid shard index");
+  }
+  const auto& layer_info = layers_[0];
+  const auto& layer_holds = buffer_holds_[0];
+  const auto& shard_info = layer_info.shards[shard_idx];
+  const auto& shard_hold = layer_holds[shard_idx];
+
+  const uint8_t* src_ptr = shard_info.host_ptr + host_offset_bytes;
+
+  std::vector<xla::Future<>> shard_futures;
+  xla::Future<> future = shard_hold.CopyRawHostToDevice(
+      const_cast<uint8_t*>(src_ptr), device_offset_bytes, size_bytes
+  );
+  shard_futures.push_back(std::move(future));
+
+  raiden::PjRtCopyFuture acc({});
+  acc.Append(std::move(shard_futures), shard_hold);
   return acc;
 }
 

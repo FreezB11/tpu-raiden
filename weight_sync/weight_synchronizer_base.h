@@ -63,11 +63,20 @@ class WeightSynchronizerBase : public tpu_raiden::RaidenManagerBase {
   void SetExternalHostBuffer(
       const std::vector<raiden::BufferHoldAndAlias>& buffer_holds);
 
- protected:
-  // Raw H2D/D2H local staging transfers encapsulated internally
+  const uint8_t* GetHostBufferPtr(size_t layer_idx, size_t shard_idx) const {
+    if (layer_idx >= num_layers_ || shard_idx >= num_shards_) {
+      return nullptr;
+    }
+    return layers_[layer_idx].shards[shard_idx].host_ptr;
+  }
+
   absl::StatusOr<raiden::PjRtCopyFuture> H2d();
   absl::StatusOr<raiden::PjRtCopyFuture> D2h();
+  absl::StatusOr<raiden::PjRtCopyFuture> H2dChunk(
+      size_t shard_idx, size_t host_offset_bytes, size_t device_offset_bytes,
+      size_t size_bytes);
 
+ protected:
   const PJRT_Api* c_api_ = nullptr;
   const PJRT_RawBuffer_Extension* extension_ = nullptr;
   size_t physical_size_ = 0;

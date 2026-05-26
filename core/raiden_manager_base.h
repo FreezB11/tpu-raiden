@@ -47,6 +47,10 @@ class RaidenManagerBase {
       const std::string& peer, const std::vector<int>& src_block_ids,
       int64_t entity_id = 0);
 
+  absl::Status PullWeightsChunk(const std::string& source, size_t src_shard_idx,
+                                size_t src_offset_bytes, size_t dst_shard_idx,
+                                size_t dst_offset_bytes, size_t size_bytes);
+
   std::optional<int> local_port() const;
 
   const uint8_t* GetHostPointer(size_t layer_idx, size_t shard_idx) const;

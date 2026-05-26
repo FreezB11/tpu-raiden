@@ -250,11 +250,42 @@ nanobind_extension(
 )
 
 py_library(
+    name = "resharding_planner",
+    srcs = ["resharding_planner.py"],
+    visibility = ["//visibility:public"],
+    deps = ["@jax//jax"],
+)
+
+py_library(
+    name = "resharding_engine",
+    srcs = ["resharding_engine.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":resharding_planner",
+        ":weight_synchronizer_jax_py",
+        "@jax//jax",
+        "@numpy//numpy",
+    ],
+)
+
+py_library(
+    name = "resharding_test_lib",
+    srcs = ["resharding_test_lib.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":resharding_planner",
+        "@jax//jax",
+        "@numpy//numpy",
+    ],
+)
+
+py_library(
     name = "weight_synchronizer_jax_py",
     srcs = ["weight_synchronizer.py"],
     visibility = ["//visibility:public"],
     deps = [
         ":_weight_synchronizer",
+        ":resharding_planner",
     ],
 )
 
@@ -263,6 +294,29 @@ py_test(
     srcs = ["weight_synchronizer_test.py"],
     deps = [
         ":weight_synchronizer_jax_py",
+        "@com_google_absl_py//absl/testing:absltest",
+        "@jax//jax",
+        "@numpy//numpy",
+    ],
+)
+
+py_test(
+    name = "resharding_planner_test",
+    srcs = ["resharding_planner_test.py"],
+    deps = [
+        ":resharding_planner",
+        "@com_google_absl_py//absl/testing:absltest",
+        "@jax//jax",
+        "@numpy//numpy",
+    ],
+)
+
+py_test(
+    name = "resharding_test",
+    srcs = ["resharding_test.py"],
+    deps = [
+        ":resharding_engine",
+        ":resharding_test_lib",
         "@com_google_absl_py//absl/testing:absltest",
         "@jax//jax",
         "@numpy//numpy",

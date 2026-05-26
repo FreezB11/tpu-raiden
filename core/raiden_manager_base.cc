@@ -369,6 +369,33 @@ struct RaidenManagerBase::BlockTransportServer {
           }
         }
       }
+    } else if (header.op == 3) {
+      // Byte-range Resharding Pull Request!
+      // remote_block_id -> src_offset_bytes
+      // local_block_id -> src_shard_idx
+      // num_blocks -> size_bytes
+      uint32_t src_offset = header.remote_block_id;
+      uint32_t src_shard_idx = header.local_block_id;
+      uint32_t size_bytes = header.num_blocks;
+
+      if (parent_->layers_.empty()) {
+        return absl::InternalError("Server host buffers are not initialized");
+      }
+      const auto& layer_info = parent_->layers_[0];
+      if (src_shard_idx >= layer_info.shards.size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Invalid source shard index: ", src_shard_idx,
+                         ", total shards: ", layer_info.shards.size()));
+      }
+      const auto& shard_info = layer_info.shards[src_shard_idx];
+      if (src_offset + size_bytes > shard_info.host_size) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Request out of bounds. Offset: ", src_offset, ", Size: ",
+            size_bytes, ", Shard Host Size: ", shard_info.host_size));
+      }
+
+      const uint8_t* src_ptr = shard_info.host_ptr + src_offset;
+      TF_RETURN_IF_ERROR(WriteExact(client_fd, src_ptr, size_bytes));
     }
     return absl::OkStatus();
   }
@@ -669,6 +696,46 @@ void RaidenManagerBase::H2hReadWorker(int stream_idx, const std::string& peer,
       }
     }
   }
+}
+
+absl::Status RaidenManagerBase::PullWeightsChunk(
+    const std::string& source, size_t src_shard_idx, size_t src_offset_bytes,
+    size_t dst_shard_idx, size_t dst_offset_bytes, size_t size_bytes) {
+  if (source.empty()) {
+    return absl::InvalidArgumentError("Source peer address cannot be empty");
+  }
+  if (layers_.empty()) {
+    return absl::InternalError("Local buffers are not initialized");
+  }
+  if (dst_shard_idx >= layers_[0].shards.size()) {
+    return absl::InvalidArgumentError("Invalid destination shard index");
+  }
+  const auto& shard_info = layers_[0].shards[dst_shard_idx];
+  if (dst_offset_bytes + size_bytes > shard_info.host_size) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Destination offset out of bounds. Offset: ", dst_offset_bytes,
+        ", Size: ", size_bytes, ", Shard Host Size: ", shard_info.host_size));
+  }
+
+  // Establish peer socket connection using anonymous namespace helper!
+  TF_ASSIGN_OR_RETURN(int fd, ConnectToPeer(source));
+  auto fd_cleaner = absl::MakeCleanup([fd] { close(fd); });
+
+  // Send our customized resharding pull header (op = 3)
+  BlockPacketHeader header;
+  header.op = 3;
+  header.remote_block_id = static_cast<uint32_t>(src_offset_bytes);
+  header.local_block_id = static_cast<uint32_t>(src_shard_idx);
+  header.num_blocks = static_cast<uint32_t>(size_bytes);
+
+  TF_RETURN_IF_ERROR(WriteExact(fd, &header, sizeof(header)));
+
+  // Read bytes directly into our local Host buffer!
+  uint8_t* dest_ptr =
+      const_cast<uint8_t*>(shard_info.host_ptr) + dst_offset_bytes;
+  TF_RETURN_IF_ERROR(ReadExact(fd, dest_ptr, size_bytes));
+
+  return absl::OkStatus();
 }
 
 }  // namespace tpu_raiden

@@ -16,6 +16,7 @@ import os
 import threading
 import time
 
+from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
@@ -26,22 +27,31 @@ from api.jax import kv_cache_manager
 
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
+flags.DEFINE_string(
+    "device_type",
+    "tpu",
+    "The JAX device backend platform to run the tests on (e.g. 'tpu', 'cpu',"
+    " 'cuda').",
+)
+
 
 class KVCacheManagerTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
+    device_type = flags.FLAGS.device_type
     try:
-      self.devices = jax.devices("tpu")
+      self.devices = jax.devices(device_type)
     except RuntimeError as exc:
-      raise AssertionError("No TPU devices found") from exc
+      raise AssertionError(f"No {device_type} devices found") from exc
 
     if not self.devices:
-      raise AssertionError("No TPU devices found")
+      raise AssertionError(f"No {device_type} devices found")
 
     self.num_devices = len(self.devices)
     num_blocks = 2
     self.shape = (num_blocks, 128, 8, 8, 128)
+    self.skip_lock = flags.FLAGS.device_type == "cpu"
 
   def create_mesh(self, axis_shapes, axis_names):
     try:
@@ -97,11 +107,13 @@ class KVCacheManagerTest(parameterized.TestCase):
 
     jax.block_until_ready(tpu_arrs)
 
-    # Initialize manager with tpu_arrs and host_blocks_to_allocate = 2 (half of 4 blocks)
+    # Initialize manager with tpu_arrs and host_blocks_to_allocate = 2 (half of
+    # 4 blocks)
     manager = kv_cache_manager.KVCacheManager(
         device_arrays=tpu_arrs,
         block_size=1,
         host_blocks_to_allocate=2,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
 
     # Step 1: D2H (TPU blocks 0:2 -> Host blocks 0:2)
@@ -205,11 +217,13 @@ class KVCacheManagerTest(parameterized.TestCase):
 
     jax.block_until_ready(tpu_arrs)
 
-    # Host blocks allocated = 5 (enough for our copies, which need 5 slices total)
+    # Host blocks allocated = 5 (enough for our copies, which need 5 slices
+    # total)
     manager = kv_cache_manager.KVCacheManager(
         device_arrays=tpu_arrs,
         block_size=1,
         host_blocks_to_allocate=5,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
 
     # Copy TPU chunks to Host:
@@ -267,6 +281,8 @@ class KVCacheManagerTest(parameterized.TestCase):
       else:
         base = jax.random.uniform(sub_key, test_shape, dtype=dtype)
       ref_arrs.append(base)
+
+    for base in ref_arrs:
       tpu_src_arrs.append(jax.device_put(base, tpu_sharding))
 
     jax.block_until_ready(tpu_src_arrs)
@@ -276,6 +292,7 @@ class KVCacheManagerTest(parameterized.TestCase):
         device_arrays=tpu_src_arrs,
         block_size=block_size,
         host_blocks_to_allocate=2,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
     # Transfer sub-region chunk of size 2 starting at offset 4 (TPU slices 4:6).
     # Needed blocks = 2 / 2 = 1 block.
@@ -288,9 +305,11 @@ class KVCacheManagerTest(parameterized.TestCase):
     )
     self.assertLen(block_ids, 1)
     self.assertEqual(block_ids[0], 0)
+
     future.Await()
 
-    # Now copy from internal host block 0 (slices 0:2) back to TPU slices 0:2 to verify.
+    # Now copy from internal host block 0 (slices 0:2) back to TPU slices 0:2 to
+    # verify.
     manager.h2d(
         src_offsets_major_dim=[0],
         dst_offsets_major_dim=[0],
@@ -343,6 +362,7 @@ class KVCacheManagerTest(parameterized.TestCase):
         block_size=block_size,
         local_port=0,
         host_blocks_to_allocate=4,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
     time.sleep(0.05)
     port = dst_manager.local_port()
@@ -353,6 +373,7 @@ class KVCacheManagerTest(parameterized.TestCase):
         device_arrays=tpu_src_arrs,
         block_size=block_size,
         host_blocks_to_allocate=4,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
     # Populate src_manager's host buffer first
     src_manager.d2h().Await()
@@ -414,12 +435,14 @@ class KVCacheManagerTest(parameterized.TestCase):
     ]
     jax.block_until_ready(tpu_dst_arrs)
 
-    # Remote server owns pre-populated source host buffers. Bound to dynamic kernel port 0.
+    # Remote server owns pre-populated source host buffers. Bound to dynamic
+    # kernel port 0.
     remote_manager = kv_cache_manager.KVCacheManager(
         device_arrays=tpu_src_arrs,
         block_size=block_size,
         local_port=0,
         host_blocks_to_allocate=4,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
     # Populate remote host buffer
     remote_manager.d2h().Await()
@@ -431,6 +454,7 @@ class KVCacheManagerTest(parameterized.TestCase):
         device_arrays=tpu_dst_arrs,
         block_size=block_size,
         host_blocks_to_allocate=4,
+        unsafe_skip_buffer_lock=self.skip_lock,
     )
 
     peer = f"127.0.0.1:{port}"
@@ -456,7 +480,6 @@ class KVCacheManagerTest(parameterized.TestCase):
 
   def test_concurrent_transfer_skip_buffer_lock(self):
     tpu_sharding = self.setup_shardings()
-    dtype = jnp.float32
     test_shape = (8, 128, 8, 8, 128)
 
     # Create host arrays.

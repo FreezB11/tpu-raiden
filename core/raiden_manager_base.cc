@@ -23,16 +23,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <thread>  // NOLINT
-#include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
@@ -198,6 +197,14 @@ struct RaidenManagerBase::BlockTransportServer {
       shutdown(server_fd_, SHUT_RDWR);
       close(server_fd_);
     }
+    {
+      absl::MutexLock _(conn_mu_);
+      for (int fd : active_client_fds_) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+      }
+      active_client_fds_.clear();
+    }
     if (listener_thread_.joinable()) {
       listener_thread_.join();
     }
@@ -281,6 +288,11 @@ struct RaidenManagerBase::BlockTransportServer {
           accept(server_fd_, reinterpret_cast<struct sockaddr*>(&client_addr),
                  &clilen);
       if (client_fd < 0) continue;
+
+      {
+        absl::MutexLock _(conn_mu_);
+        active_client_fds_.push_back(client_fd);
+      }
 
       int opt = 1;
       setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
@@ -367,7 +379,9 @@ struct RaidenManagerBase::BlockTransportServer {
       pfd.fd = client_fd;
       pfd.events = POLLIN;
       int ret = poll(&pfd, 1, 50);
-      if (ret < 0) break;
+      if (ret < 0) {
+        break;
+      }
       if (ret == 0) continue;
 
       if (!ProcessSingleRequest(client_fd).ok()) {
@@ -375,6 +389,12 @@ struct RaidenManagerBase::BlockTransportServer {
       }
     }
     close(client_fd);
+    {
+      absl::MutexLock _(conn_mu_);
+      active_client_fds_.erase(std::remove(active_client_fds_.begin(),
+                                           active_client_fds_.end(), client_fd),
+                               active_client_fds_.end());
+    }
   }
 
   RaidenManagerBase* parent_;
@@ -385,6 +405,7 @@ struct RaidenManagerBase::BlockTransportServer {
   absl::Mutex conn_mu_;
   absl::flat_hash_map<std::string, int> connection_pool_
       ABSL_GUARDED_BY(conn_mu_);
+  std::vector<int> active_client_fds_ ABSL_GUARDED_BY(conn_mu_);
 
   std::thread listener_thread_;
   std::vector<std::thread> worker_threads_;
@@ -406,7 +427,11 @@ RaidenManagerBase::RaidenManagerBase(size_t num_layers, size_t num_shards,
   }
 }
 
-RaidenManagerBase::~RaidenManagerBase() = default;
+RaidenManagerBase::~RaidenManagerBase() {
+  if (server_) {
+    server_.reset();
+  }
+}
 
 std::optional<int> RaidenManagerBase::local_port() const {
   if (server_) return server_->local_port_;

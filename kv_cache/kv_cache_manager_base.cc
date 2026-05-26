@@ -25,7 +25,6 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "xla/pjrt/c_api_client/pjrt_c_api_client.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
@@ -169,7 +168,11 @@ KVCacheManagerBase::KVCacheManagerBase(
   }
 }
 
-KVCacheManagerBase::~KVCacheManagerBase() = default;
+KVCacheManagerBase::~KVCacheManagerBase() {
+  buffer_holds_.clear();
+  layers_.clear();
+  block_manager_.reset();
+}
 
 absl::StatusOr<raiden::PjRtCopyFuture> KVCacheManagerBase::H2d(
     const std::vector<int64_t>& src_offsets_major_dim,

@@ -151,6 +151,7 @@ py_test(
     deps = [
         ":kv_cache_manager_jax_py",
         "//learning/brain/research/jax:tpu_support",
+        "//third_party/py/absl/flags",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
         "@jax//jax",
@@ -173,6 +174,27 @@ py_test(
     deps = [
         ":kv_cache_manager_jax_py",
         "//learning/brain/research/jax:tpu_support",
+        "//third_party/py/absl/flags",
+        "@com_google_absl_py//absl/testing:absltest",
+        "@com_google_absl_py//absl/testing:parameterized",
+        "@jax//jax",
+        "@numpy//numpy",
+    ],
+)
+
+py_test(
+    name = "kv_cache_manager_test_cpu",
+    timeout = "long",
+    srcs = ["kv_cache_manager_test.py"],
+    args = ["--device_type=cpu"],
+    main = "kv_cache_manager_test.py",
+    tags = [
+        "cpu:4",
+        "notap",
+    ],
+    deps = [
+        ":kv_cache_manager_jax_py",
+        "//third_party/py/absl/flags",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
         "@jax//jax",

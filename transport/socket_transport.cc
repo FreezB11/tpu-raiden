@@ -104,6 +104,14 @@ SocketTransport::SocketTransport(int local_port) : local_port_(local_port) {
                << std::strerror(errno);
   }
 
+  socklen_t len = sizeof(serv_addr);
+  if (getsockname(server_fd_, reinterpret_cast<struct sockaddr*>(&serv_addr),
+                  &len) == 0) {
+    local_port_ = ntohs(serv_addr.sin_port);
+  } else {
+    LOG(WARNING) << "getsockname failed: " << std::strerror(errno);
+  }
+
   if (listen(server_fd_, 128) < 0) {
     LOG(FATAL) << "Failed to listen on server socket: " << std::strerror(errno);
   }
@@ -191,6 +199,16 @@ absl::StatusOr<int> SocketTransport::GetOrCreateConnection(
   return sock_fd;
 }
 
+void SocketTransport::CloseConnection(std::string_view peer, int fd) {
+  std::string peer_str(peer);
+  absl::MutexLock _(&conn_mu_);
+  auto it = connection_pool_.find(peer_str);
+  if (it != connection_pool_.end() && it->second == fd) {
+    close(it->second);
+    connection_pool_.erase(it);
+  }
+}
+
 absl::StatusOr<peregrine::Handle> SocketTransport::Post(
     std::string_view peer, const peregrine::Request& request) {
   if (!request.IsValid()) {
@@ -212,13 +230,17 @@ absl::StatusOr<peregrine::Handle> SocketTransport::Post(
   }
 
   absl::Status op_status;
-  if (request.op == peregrine::Op::kWrite) {
-    op_status = DispatchWrite(fd, request);
-  } else if (request.op == peregrine::Op::kRead) {
-    op_status = DispatchReadRequest(fd, request);
-  } else {
-    op_status = absl::InternalError("Unsupported transport operation");
+  {
+    absl::MutexLock _(&post_mu_);
+    if (request.op == peregrine::Op::kWrite) {
+      op_status = DispatchWrite(fd, request);
+    } else if (request.op == peregrine::Op::kRead) {
+      op_status = DispatchReadRequest(fd, request);
+    } else {
+      op_status = absl::InternalError("Unsupported transport operation");
+    }
   }
+  if (!op_status.ok()) CloseConnection(peer, fd);
 
   absl::MutexLock _(&mu_);
   if (op_status.ok()) {

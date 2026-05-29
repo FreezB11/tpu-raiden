@@ -79,6 +79,10 @@ class SocketTransport final : public peregrine::Transport {
   absl::StatusOr<int> GetOrCreateConnection(std::string_view peer)
       ABSL_LOCKS_EXCLUDED(conn_mu_);
 
+  // Removes a cached connection after a transport error.
+  void CloseConnection(std::string_view peer, int fd)
+      ABSL_LOCKS_EXCLUDED(conn_mu_);
+
   // Background listener loop accepting incoming connection sockets.
   void ListenerLoop();
 
@@ -104,6 +108,10 @@ class SocketTransport final : public peregrine::Transport {
   absl::Mutex conn_mu_;
   absl::flat_hash_map<std::string, int> connection_pool_
       ABSL_GUARDED_BY(conn_mu_);
+
+  // The current socket protocol is request/response over a shared stream. Keep
+  // posts serialized so response payloads cannot interleave on a pooled fd.
+  absl::Mutex post_mu_;
 
   std::thread listener_thread_;
   std::vector<std::thread> worker_threads_;

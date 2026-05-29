@@ -248,3 +248,23 @@ py_library(
         "//third_party/py/torch_tpu:_loader",
     ],
 )
+
+py_test(
+    name = "raiden_transfer_engine_test",
+    srcs = ["raiden_transfer_engine_test.py"],
+    tags = [
+        "cpu:8",
+        "notap",
+        "requires-accel-hbm",
+        "requires-ghostlite:8",
+        "requires-net:external",
+    ],
+    deps = [
+        ":raiden_transfer_engine",
+        "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_tpu",
+        "@com_google_absl_py//absl/testing:absltest",
+        "@com_google_absl_py//absl/testing:parameterized",
+        "@pypi//numpy",
+    ],
+)

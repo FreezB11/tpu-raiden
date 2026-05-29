@@ -67,11 +67,11 @@ def make_resharding_plan(
   # Canonical Sorting: Sort addressable devices strictly by global row/col slice starts!
   # This maps physical device placements to deterministic logical index coordinates.
   src_devices = sorted(
-      src_sharding.addressable_devices,
+      src_sharding.mesh.devices.flatten(),
       key=lambda d: (src_map[d][0].start or 0, src_map[d][1].start or 0),
   )
   dst_devices = sorted(
-      dst_sharding.addressable_devices,
+      dst_sharding.mesh.devices.flatten(),
       key=lambda d: (dst_map[d][0].start or 0, dst_map[d][1].start or 0),
   )
 
@@ -139,6 +139,89 @@ def make_resharding_plan(
             ReshardChunk(
                 src_device_id=i,
                 dst_device_id=j,
+                src_slice=(
+                    local_src_row_start,
+                    local_src_row_end,
+                    local_src_col_start,
+                    local_src_col_end,
+                ),
+                dst_slice=(
+                    local_dst_row_start,
+                    local_dst_row_end,
+                    local_dst_col_start,
+                    local_dst_col_end,
+                ),
+                shape=chunk_shape,
+            )
+        )
+
+  return plan
+
+
+def make_resharding_plan_from_metadata(
+    global_shape: Tuple[int, int],
+    src_metadata: List[Tuple[int, int, int, int, int]],
+    dst_sharding: jax.sharding.NamedSharding,
+) -> List[ReshardChunk]:
+  """Generates plan from metadata when src_sharding is not available."""
+  K, N = global_shape
+  dst_map = dst_sharding.devices_indices_map(global_shape)
+
+  dst_devices = sorted(
+      dst_sharding.mesh.devices.flatten(),
+      key=lambda d: (dst_map[d][0].start or 0, dst_map[d][1].start or 0),
+  )
+
+  sorted_src_metadata = sorted(src_metadata, key=lambda x: (x[1], x[3]))
+
+  plan = []
+
+  for (
+      src_dev_id,
+      src_row_start,
+      src_row_end,
+      src_col_start,
+      src_col_end,
+  ) in sorted_src_metadata:
+    for j, dst_dev in enumerate(dst_devices):
+      dst_row_slice, dst_col_slice = dst_map[dst_dev]
+      dst_row_start = (
+          dst_row_slice.start if dst_row_slice.start is not None else 0
+      )
+      dst_row_end = dst_row_slice.stop if dst_row_slice.stop is not None else K
+      dst_col_start = (
+          dst_col_slice.start if dst_col_slice.start is not None else 0
+      )
+      dst_col_end = dst_col_slice.stop if dst_col_slice.stop is not None else N
+
+      intersect_row_start = max(src_row_start, dst_row_start)
+      intersect_row_end = min(src_row_end, dst_row_end)
+      intersect_col_start = max(src_col_start, dst_col_start)
+      intersect_col_end = min(src_col_end, dst_col_end)
+
+      if (
+          intersect_row_start < intersect_row_end
+          and intersect_col_start < intersect_col_end
+      ):
+        chunk_shape = (
+            intersect_row_end - intersect_row_start,
+            intersect_col_end - intersect_col_start,
+        )
+
+        local_src_row_start = intersect_row_start - src_row_start
+        local_src_row_end = intersect_row_end - src_row_start
+        local_src_col_start = intersect_col_start - src_col_start
+        local_src_col_end = intersect_col_end - src_col_start
+
+        local_dst_row_start = intersect_row_start - dst_row_start
+        local_dst_row_end = intersect_row_end - dst_row_start
+        local_dst_col_start = intersect_col_start - dst_col_start
+        local_dst_col_end = intersect_col_end - dst_col_start
+
+        plan.append(
+            ReshardChunk(
+                src_device_id=src_dev_id,
+                dst_device_id=dst_dev.id,
                 src_slice=(
                     local_src_row_start,
                     local_src_row_end,

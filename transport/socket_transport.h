@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>  // NOLINT
 #include <vector>
 
@@ -30,22 +31,22 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "third_party/mlcl/src/api/transport.h"
-#include "third_party/mlcl/src/api/types.h"
+#include "third_party/peregrine/src/api/transport.h"
+#include "third_party/peregrine/src/api/types.h"
 
 namespace tpu_raiden {
 namespace transport {
 
-// Prototyped POSIX TCP socket implementation of mlcl::Transport interface.
+// Prototyped POSIX TCP socket implementation of peregrine::Transport interface.
 // Spins up a dedicated background server thread listening on a local port to
 // receive cross-host data transfer requests. Uses a custom binary packet
 // protocol to push and pull payload byte arrays mapping remote virtual memory
 // addresses.
-class SocketTransport final : public mlcl::Transport {
+class SocketTransport final : public peregrine::Transport {
  public:
   // Binary packet header layout for remote socket stream transmission.
   struct alignas(8) PacketHeader {
-    mlcl::Op op;
+    peregrine::Op op;
     uint64_t remote_addr;
     uint64_t local_addr;
     uint64_t length;
@@ -63,11 +64,11 @@ class SocketTransport final : public mlcl::Transport {
 
   // Posts an asynchronous transport request to communicate with `peer`.
   // Returns a process-unique handle to poll completion.
-  absl::StatusOr<mlcl::Handle> Post(mlcl::Endpoint peer,
-                                    const mlcl::Request& request) override;
+  absl::StatusOr<peregrine::Handle> Post(std::string_view peer,
+                                    const peregrine::Request& request) override;
 
   // Queries the completion status of `handle`. Removes handle if completed.
-  absl::StatusOr<mlcl::Status> Poll(mlcl::Handle handle) override;
+  absl::StatusOr<peregrine::Status> Poll(peregrine::Handle handle) override;
 
   // Expose listening port.
   int local_port() const { return local_port_; }
@@ -75,7 +76,7 @@ class SocketTransport final : public mlcl::Transport {
  private:
   // Resolves peer endpoint string to IP and port. Returns cached socket or
   // connects.
-  absl::StatusOr<int> GetOrCreateConnection(mlcl::Endpoint peer)
+  absl::StatusOr<int> GetOrCreateConnection(std::string_view peer)
       ABSL_LOCKS_EXCLUDED(conn_mu_);
 
   // Background listener loop accepting incoming connection sockets.
@@ -86,10 +87,10 @@ class SocketTransport final : public mlcl::Transport {
   void ConnectionWorker(int client_fd);
 
   // Dispatches socket write operation for Post.
-  absl::Status DispatchWrite(int fd, const mlcl::Request& request);
+  absl::Status DispatchWrite(int fd, const peregrine::Request& request);
 
   // Dispatches socket read request for Post.
-  absl::Status DispatchReadRequest(int fd, const mlcl::Request& request);
+  absl::Status DispatchReadRequest(int fd, const peregrine::Request& request);
 
   int local_port_;
   int server_fd_ = -1;
@@ -97,7 +98,7 @@ class SocketTransport final : public mlcl::Transport {
 
   absl::Mutex mu_;
   uint32_t handle_counter_ ABSL_GUARDED_BY(mu_) = 0;
-  absl::flat_hash_map<mlcl::Handle, mlcl::Status> status_map_
+  absl::flat_hash_map<peregrine::Handle, peregrine::Status> status_map_
       ABSL_GUARDED_BY(mu_);
 
   absl::Mutex conn_mu_;

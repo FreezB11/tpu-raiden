@@ -30,10 +30,20 @@
 
 import contextlib
 from typing import Tuple
+
+from absl import flags
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 # JAX-native open-source profiler imports loaded dynamically on export
+
+
+flags.DEFINE_string(
+    'profiling_log_dir',
+    '/tmp/tb_logs',
+    'Target directory matching TB profiles logs tracking maps.',
+)
 
 P = jax.sharding.PartitionSpec
 Mesh = jax.sharding.Mesh
@@ -101,7 +111,7 @@ def _update_sharding_spec(spec, new_rank: int):
 def xprof_session_manager(dtype):
   """Context manager for XProf session."""
   import os
-  log_dir = f"/mnt/disks/persistent/amylin/tpu-raiden/tb_logs_{dtype}"
+  log_dir = f"{flags.FLAGS.profiling_log_dir}_{dtype}"
   os.makedirs(log_dir, exist_ok=True)
   jax.profiler.start_trace(log_dir)
   try:
@@ -109,9 +119,22 @@ def xprof_session_manager(dtype):
   finally:
     jax.profiler.stop_trace()
     print("*" * 80)
-    print(f"Hardware trace capture completed successfully! Target metrics logged to {log_dir}")
-    print("Visualize trace metrics natively by executing: tensorboard --logdir=" + log_dir)
+    print(
+        "Hardware trace capture completed successfully! "
+        f"Target metrics logged to {log_dir}"
+    )
+    print(
+        "Visualize trace metrics natively by executing: "
+        f"tensorboard --logdir={log_dir}"
+    )
     print("*" * 80)
+
+
+@contextlib.contextmanager
+def trace_annotation_context(name: str):
+  """Platform-agnostic JAX/XProf profiling trace annotations context manager."""
+  with jax.profiler.TraceAnnotation(name):
+    yield
 
 
 def create_mesh(axis_shapes, axis_names, explicit_axis: bool = False):
@@ -139,7 +162,7 @@ def create_mesh(axis_shapes, axis_names, explicit_axis: bool = False):
 
 
 def create_single_layer_kv_cache(
-    cache_shape: Tuple,
+    cache_shape: Tuple[int, ...],
     cache_dtype: jnp.dtype,
     cache_sharding: jax.sharding.NamedSharding,
     init_zeros: bool = False,

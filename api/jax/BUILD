@@ -15,7 +15,6 @@
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//third_party/bazel_rules/rules_python/python:py_binary.bzl", "py_binary")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -36,10 +35,44 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":jax_utils",
         "//kv_cache:kv_cache_manager_base",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
         "@nanobind",
+    ],
+)
+
+cc_library(
+    name = "jax_utils",
+    hdrs = [
+        "jax_utils.h",
+    ],
+    copts = [
+        "-fexceptions",
+    ],
+    features = [
+        "-use_header_modules",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@jax//jaxlib:py_client",
+        "@nanobind",
+        "@rules_python//python/cc:current_py_cc_headers",
         "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/python/ifrt",
+        "@xla//xla/python/pjrt_ifrt",
+    ],
+)
+
+cc_library(
+    name = "nb_statusor",
+    hdrs = ["nb_statusor.h"],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@nanobind",
+        "@rules_python//python/cc:current_py_cc_headers",
     ],
 )
 
@@ -47,6 +80,7 @@ nanobind_extension(
     name = "_kv_cache_manager",
     srcs = [
         "kv_cache_manager_module.cc",
+        "nb_statusor.h",
     ],
     copts = [
         "-fexceptions",
@@ -58,9 +92,13 @@ nanobind_extension(
     visibility = ["//visibility:public"],
     deps = [
         ":kv_cache_manager_jax",
+        ":nb_statusor",
+        "//core:raw_transfer_core",
         "//kv_cache:kv_cache_manager_base",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@nanobind",
+        "@rules_python//python/cc:current_py_cc_headers",
     ],
 )
 
@@ -70,6 +108,41 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":_kv_cache_manager",
+    ],
+)
+
+nanobind_extension(
+    name = "kv_cache_store",
+    srcs = [
+        "kv_cache_store_module.cc",
+    ],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = ["-use_header_modules"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":kv_cache_manager_jax",
+        "//kv_cache:kv_cache_store",
+        "@nanobind",
+        "@xla//xla/pjrt:status_casters",
+    ],
+)
+
+py_test(
+    name = "kv_cache_store_test",
+    srcs = ["kv_cache_store_test.py"],
+    data = ["//kv_cache/global_registry:global_registry_server"],
+    deps = [
+        ":kv_cache_manager_jax_py",
+        ":kv_cache_store",
+        "@com_google_absl_py//absl/testing:absltest",
+        "@com_google_absl_py//absl/testing:parameterized",
+        "@jax//jax",
+        "@pypi//numpy",
+        # buildcleaner: keep
+        "//raiden_lib/raw_transfer/jax:raw_transfer",
     ],
 )
 
@@ -131,53 +204,68 @@ py_library(
         ":_kv_cache_manager_ffi",
         "@jax//jax",
         "@jax//jax/experimental:compute_on",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
-py_test(
-    name = "kv_cache_manager_test_gl",
-    timeout = "long",
-    srcs = ["kv_cache_manager_test.py"],
-    main = "kv_cache_manager_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostlite:8",
-        "requires-net:external",
+cc_library(
+    name = "weight_synchronizer_ffi",
+    srcs = [
+        "weight_synchronizer_ffi.cc",
     ],
+    hdrs = [
+        "weight_synchronizer_ffi.h",
+    ],
+    copts = [
+        "-fexceptions",
+        "-march=x86-64-v2",
+    ],
+    features = [
+        "-use_header_modules",
+    ],
+    visibility = ["//visibility:public"],
     deps = [
-        ":kv_cache_manager_jax_py",
-        "//learning/brain/research/jax:tpu_support",
-        "//third_party/py/absl/flags",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
-        "@jax//jax",
-        "@numpy//numpy",
+        ":weight_synchronizer_jax",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@xla//xla/ffi/api:ffi",
+        "@xla//xla/stream_executor:platform",
+        "@xla//xla/stream_executor:platform_manager",
+        "@xla//xla/stream_executor:stream",
+        "@xla//xla/stream_executor:stream_executor_h",
+    ],
+    alwayslink = 1,
+)
+
+nanobind_extension(
+    name = "_weight_synchronizer_ffi",
+    srcs = [
+        "weight_synchronizer_ffi_module.cc",
+    ],
+    copts = [
+        "-fexceptions",
+        "-march=x86-64-v2",
+    ],
+    features = [
+        "-use_header_modules",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":weight_synchronizer_ffi",
+        ":weight_synchronizer_jax",
+        "@nanobind",
     ],
 )
 
-py_test(
-    name = "kv_cache_manager_test_gf",
-    timeout = "long",
-    srcs = ["kv_cache_manager_test.py"],
-    main = "kv_cache_manager_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostfish:4",
-        "requires-net:external",
-    ],
+py_library(
+    name = "weight_synchronizer_ffi_py",
+    srcs = ["weight_synchronizer_ffi.py"],
+    visibility = ["//visibility:public"],
     deps = [
-        ":kv_cache_manager_jax_py",
-        "//learning/brain/research/jax:tpu_support",
-        "//third_party/py/absl/flags",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
+        ":_weight_synchronizer_ffi",
         "@jax//jax",
-        "@numpy//numpy",
+        "@jax//jax/experimental:compute_on",
+        "@pypi//numpy",
     ],
 )
 
@@ -193,11 +281,11 @@ py_test(
     ],
     deps = [
         ":kv_cache_manager_jax_py",
-        "//third_party/py/absl/flags",
+        "@com_google_absl_py//absl/flags",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -217,7 +305,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        ":jax_utils",
         "//weight_sync:weight_synchronizer_base",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -241,7 +329,7 @@ nanobind_extension(
     visibility = ["//visibility:public"],
     deps = [
         ":weight_synchronizer_jax",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "//core:raw_transfer_core",
         "//weight_sync:weight_synchronizer_base",
         "@com_google_absl//absl/status:statusor",
         "@nanobind",
@@ -261,9 +349,10 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":resharding_planner",
-        ":weight_synchronizer_jax_py",
+        ":weight_synchronizer_ffi_py",
+        "//rpc:coordination_helper",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -274,7 +363,7 @@ py_library(
     deps = [
         ":resharding_planner",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -282,10 +371,7 @@ py_library(
     name = "weight_synchronizer_jax_py",
     srcs = ["weight_synchronizer.py"],
     visibility = ["//visibility:public"],
-    deps = [
-        ":_weight_synchronizer",
-        ":resharding_planner",
-    ],
+    deps = [":_weight_synchronizer"],
 )
 
 py_test(
@@ -295,7 +381,7 @@ py_test(
         ":weight_synchronizer_jax_py",
         "@com_google_absl_py//absl/testing:absltest",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -306,7 +392,7 @@ py_test(
         ":resharding_planner",
         "@com_google_absl_py//absl/testing:absltest",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -318,39 +404,6 @@ py_test(
         ":resharding_test_lib",
         "@com_google_absl_py//absl/testing:absltest",
         "@jax//jax",
-        "@numpy//numpy",
-    ],
-)
-
-py_library(
-    name = "mc_jax_ffi_test_main_lib",
-    srcs = ["mc_jax_ffi_test_main.py"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":kv_cache_manager_ffi_py",
-        "//learning/brain/research/jax:tpu_support",
-        "//third_party/py/absl:app",
-        "//third_party/py/absl/flags",
-        "@jax//jax",
-        "@numpy//numpy",
-    ],
-)
-
-py_binary(
-    name = "mc_jax_ffi_test_main",
-    srcs = ["mc_jax_ffi_test_main.py"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":mc_jax_ffi_test_main_lib",
-    ],
-)
-
-py_test(
-    name = "mc_jax_ffi_test_main_test",
-    srcs = ["mc_jax_ffi_test_main_test.py"],
-    deps = [
-        ":mc_jax_ffi_test_main_lib",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@jax//jax",
+        "@pypi//numpy",
     ],
 )

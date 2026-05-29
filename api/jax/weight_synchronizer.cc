@@ -25,8 +25,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include <nanobind/nanobind.h>
-#include "xla/pjrt/pjrt_client.h"
-#include "raiden_lib/raw_transfer/raw_transfer_impl.h"
+#include "api/jax/jax_utils.h"
 
 namespace nb = nanobind;
 

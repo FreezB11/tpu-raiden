@@ -23,7 +23,7 @@
 #include "pybind11/stl.h"
 #include "absl/status/status.h"
 #include "api/torch/weight_synchronizer.h"
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
+#include "core/raw_transfer_core.h"
 #include "torch/extension.h"
 
 namespace py = pybind11;

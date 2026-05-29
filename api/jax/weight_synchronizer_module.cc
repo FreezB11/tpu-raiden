@@ -24,7 +24,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include "api/jax/weight_synchronizer.h"
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
+#include "core/raw_transfer_core.h"
 
 namespace nb = nanobind;
 

@@ -19,6 +19,19 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test")
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
+    name = "torch_tpu_stablehlo_headers",
+    deps = [
+        "//third_party/stablehlo:chlo_ops",
+        "//third_party/stablehlo:stablehlo_ops",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:attr_type_builder_util",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:chlo_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:func_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:mlir_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:stablehlo_builder",
+    ],
+)
+
+cc_library(
     name = "kv_cache_manager_torch",
     srcs = [
         "kv_cache_manager.cc",
@@ -27,6 +40,7 @@ cc_library(
         "kv_cache_manager.h",
     ],
     copts = [
+        "-std=c++20",
         "-fexceptions",
         "-march=x86-64-v2",
     ],
@@ -35,6 +49,8 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":torch_tpu_stablehlo_headers",
+        "//core:xla_raw_transfer_headers",
         "//kv_cache:kv_cache_manager_base",
         "//third_party/py/torch:aten_headers",
         "//third_party/py/torch:torch_headers",
@@ -42,6 +58,7 @@ cc_library(
         "//third_party/py/torch/torch/headeronly:torch_headeronly",
         "//third_party/py/torch_tpu/eager:device_buffer",
         "//third_party/py/torch_tpu/eager:materialize",
+        "//third_party/py/torch_tpu/eager:tensor_to_buffer",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@xla//xla/pjrt:pjrt_client",
@@ -62,8 +79,8 @@ nanobind_extension(
     visibility = ["//visibility:public"],
     deps = [
         ":kv_cache_manager_torch",
+        "//core:raw_transfer_core",
         "//kv_cache:kv_cache_manager_base",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
         "//third_party/py/torch:torch_headers",
         "//third_party/pybind11",
         "@com_google_absl//absl/status:statusor",
@@ -97,7 +114,7 @@ py_test(
         "//third_party/py/torch_tpu",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -110,6 +127,7 @@ cc_library(
         "weight_synchronizer.h",
     ],
     copts = [
+        "-std=c++20",
         "-fexceptions",
         "-march=x86-64-v2",
     ],
@@ -124,6 +142,14 @@ cc_library(
         "//third_party/py/torch/torch/headeronly:torch_headeronly",
         "//third_party/py/torch_tpu/eager:device_buffer",
         "//third_party/py/torch_tpu/eager:materialize",
+        "//third_party/py/torch_tpu/eager:tensor_to_buffer",
+        "//third_party/stablehlo:chlo_ops",
+        "//third_party/stablehlo:stablehlo_ops",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:attr_type_builder_util",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:chlo_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:func_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:mlir_builder",
+        "//third_party/stablehlo/stablehlo/integrations/cpp/builder:stablehlo_builder",
         "//weight_sync:weight_synchronizer_base",
         "@com_google_absl//absl/status",
         "@xla//xla/pjrt:pjrt_client",
@@ -144,7 +170,7 @@ nanobind_extension(
     visibility = ["//visibility:public"],
     deps = [
         ":weight_synchronizer_torch",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "//core:raw_transfer_core",
         "//third_party/py/torch:torch_headers",
         "//third_party/pybind11",
         "//weight_sync:weight_synchronizer_base",
@@ -179,6 +205,46 @@ py_test(
         "//third_party/py/torch_tpu",
         "@com_google_absl_py//absl/testing:absltest",
         "@com_google_absl_py//absl/testing:parameterized",
-        "@numpy//numpy",
+        "@pypi//numpy",
+    ],
+)
+
+nanobind_extension(
+    name = "_raiden_transfer_engine",
+    srcs = ["raiden_transfer_engine.cc"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = [
+        "-use_header_modules",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":kv_cache_manager_torch",
+        "//core:raw_transfer_core",
+        "//kv_cache:kv_cache_manager_base",
+        "//third_party/py/torch:aten_headers",
+        "//third_party/py/torch:torch_headers",
+        "//third_party/pybind11",
+        "//transport:socket_transport",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+py_library(
+    name = "raiden_transfer_engine",
+    srcs = ["raiden_transfer_engine.py"],
+    data = [
+        "raiden_transfer_engine.pyi",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":_raiden_transfer_engine",
+        "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_tpu",
+        "//third_party/py/torch_tpu:_loader",
     ],
 )

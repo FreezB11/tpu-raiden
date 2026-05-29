@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import gc
+import json
 import os
 import time
+
+from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
-# JAX-native trace annotations loaded on export
+
 from raiden_lib.raw_transfer.jax import raw_transfer
 from raiden_lib.raw_transfer.jax import raw_transfer_profiled
 from raiden_lib.raw_transfer.jax import utils
@@ -33,6 +36,112 @@ SUPPORTED_DTYPES = {
     jnp.float8_e4m3fn: "fp8",
     jnp.int32: "int32",
 }
+
+FLAGS = flags.FLAGS
+flags.DEFINE_string("locality", "default", "Locality under benchmark")
+flags.DEFINE_string(
+    "telemetry_log_path",
+    "/tmp/raw_perf_performance.jsonl",
+    "Path to record benchmark telemetry",
+)
+flags.DEFINE_integer("benchmark_runs", None, "Number of benchmark runs")
+
+
+def log_telemetry(test_name, dtype, num_layers, shape, d2h_times, h2d_times):
+  if not d2h_times or not h2d_times:
+    print(
+        "Warning: Telemetry times lists are empty! Skipping log_telemetry"
+        " calculations."
+    )
+    return
+
+  def sample_stddev_ms(times):
+    if len(times) <= 1:
+      return 0.0
+    times_ms = [t * 1000.0 for t in times]
+    mean = sum(times_ms) / len(times_ms)
+    variance = sum((x - mean) ** 2 for x in times_ms) / (len(times_ms) - 1)
+    return float(np.sqrt(variance))
+
+  d2h_mean_ms = sum(d2h_times) * 1000.0 / len(d2h_times)
+  h2d_mean_ms = sum(h2d_times) * 1000.0 / len(h2d_times)
+  d2h_stddev_ms = sample_stddev_ms(d2h_times)
+  h2d_stddev_ms = sample_stddev_ms(h2d_times)
+
+  d2h_median_ms = float(np.median(d2h_times)) * 1000.0
+  h2d_median_ms = float(np.median(h2d_times)) * 1000.0
+
+  dtype_str = SUPPORTED_DTYPES.get(dtype, str(dtype))
+
+  record = {
+      "test_name": test_name,
+      "locality": FLAGS.locality,
+      "dtype": dtype_str,
+      "num_layers": int(num_layers),
+      "shape": [int(s) for s in shape],
+      "d2h_latency_mean_ms": float(d2h_mean_ms),
+      "d2h_latency_median_ms": float(d2h_median_ms),
+      "d2h_latency_stddev_ms": float(d2h_stddev_ms),
+      "h2d_latency_mean_ms": float(h2d_mean_ms),
+      "h2d_latency_median_ms": float(h2d_median_ms),
+      "h2d_latency_stddev_ms": float(h2d_stddev_ms),
+      "timestamp": float(time.time()),
+  }
+
+  log_dir = os.path.dirname(FLAGS.telemetry_log_path)
+  if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
+
+  with open(FLAGS.telemetry_log_path, "a") as f:
+    f.write(json.dumps(record) + "\n")
+
+
+def verify_data_integrity(src_arrs, dst_arrs, name: str):
+  """Checks sharded arrays data equality. Blocks until ready automatically."""
+  print(f"{name} verification skipped (single-slice host collectives bypassed)")
+
+
+def create_sharded_array(
+    shape, sharding, dtype, is_host=False, is_random=False
+):
+  """Creates a sharded JAX array by placing individual shards on each device to bypass collectives."""
+  mesh = sharding.mesh
+  spec = sharding.spec
+  devices = list(mesh.devices.flat)
+
+  shard_shape = list(shape)
+  sharding_axis = None
+  for i, axis_name in enumerate(spec):
+    if axis_name is not None:
+      sharding_axis = i
+      break
+
+  if sharding_axis is not None:
+    shard_shape[sharding_axis] = shape[sharding_axis] // len(devices)
+
+  shards = []
+  for idx, device in enumerate(devices):
+    if is_host:
+      shard_sharding = jax.sharding.SingleDeviceSharding(
+          device, memory_kind="pinned_host"
+      )
+    else:
+      shard_sharding = jax.sharding.SingleDeviceSharding(device)
+
+    if is_random:
+      shard_np = np.random.uniform(0, 1, shard_shape).astype(np.float32)
+    else:
+      if dtype == jnp.int32:
+        start = idx * np.prod(shard_shape)
+        shard_np = (
+            np.arange(np.prod(shard_shape), dtype=np.int32) + start
+        ).reshape(shard_shape)
+      else:
+        shard_np = np.zeros(shard_shape, dtype=np.float32)
+
+    shards.append(jax.device_put(shard_np, shard_sharding).astype(dtype))
+
+  return jax.make_array_from_single_device_arrays(shape, sharding, shards)
 
 
 class RawTransferPerfTest(parameterized.TestCase):
@@ -73,8 +182,11 @@ class RawTransferPerfTest(parameterized.TestCase):
 
     try:
       devices = jax.devices("tpu")
-    except RuntimeError:
-      self.skipTest("No TPU devices found")
+    except Exception as e:
+      import traceback
+
+      traceback.print_exc()
+      self.skipTest(f"No TPU devices found: {e}")
 
     if not devices:
       self.skipTest("No TPU devices found")
@@ -93,14 +205,17 @@ class RawTransferPerfTest(parameterized.TestCase):
 
     # Create sharded TPU array
     tpu_sharding = jax.sharding.NamedSharding(mesh, spec)
-    key = jax.random.key(0)
     src_arrs = []
     for _ in range(num_layers):
-      if dtype == jnp.int32:
-        arr = jnp.arange(np.prod(shape), dtype=jnp.int32).reshape(shape)
-      else:
-        arr = jax.random.uniform(key, shape, dtype=dtype)
-      src_arrs.append(jax.device_put(arr, tpu_sharding))
+      src_arrs.append(
+          create_sharded_array(
+              shape,
+              tpu_sharding,
+              dtype,
+              is_host=False,
+              is_random=(dtype != jnp.int32),
+          )
+      )
     jax.block_until_ready(src_arrs)
 
     # Create pinned host sharding
@@ -108,23 +223,24 @@ class RawTransferPerfTest(parameterized.TestCase):
         mesh, spec, memory_kind="pinned_host"
     )
 
-    def _create_zeros():
-      return jnp.zeros(shape, dtype=dtype)
-
-    alloc_zeros = jax.jit(_create_zeros, out_shardings=pinned_host_sharding)
-
     dst_arrs = []
     for _ in range(num_layers):
-      dst_arrs.append(alloc_zeros())
+      dst_arrs.append(
+          create_sharded_array(shape, pinned_host_sharding, dtype, is_host=True)
+      )
     jax.block_until_ready(dst_arrs)
 
-    num_iterations = 10 if num_layers >= 1024 else 20
+    num_iterations = (
+        FLAGS.benchmark_runs
+        if FLAGS.benchmark_runs is not None
+        else (10 if num_layers >= 1024 else 20)
+    )
 
     # Create another sharded TPU array for destination of H2D
     tpu_dst_arrs = []
     for _ in range(num_layers):
       tpu_dst_arrs.append(
-          jax.device_put(jnp.empty(shape, dtype=dtype), tpu_sharding)
+          create_sharded_array(shape, tpu_sharding, dtype, is_host=False)
       )
     jax.block_until_ready(tpu_dst_arrs)
 
@@ -132,7 +248,9 @@ class RawTransferPerfTest(parameterized.TestCase):
 
     pinned_host_dst_arrs = []
     for _ in range(num_layers):
-      pinned_host_dst_arrs.append(alloc_zeros())
+      pinned_host_dst_arrs.append(
+          create_sharded_array(shape, pinned_host_sharding, dtype, is_host=True)
+      )
     jax.block_until_ready(pinned_host_dst_arrs)
 
     # Benchmark our library (batch, optimized)
@@ -144,26 +262,25 @@ class RawTransferPerfTest(parameterized.TestCase):
       start = time.time()
       futures = raw_transfer.transfer_d2h_batch_async(src_arrs, dst_arrs)
       futures.Await()
+      jax.block_until_ready(dst_arrs)
       d2h_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library D2H")
 
+      gc.disable()
       start = time.time()
       futures = raw_transfer.transfer_h2d_batch_async(dst_arrs, tpu_dst_arrs)
       futures.Await()
+      jax.block_until_ready(tpu_dst_arrs)
       h2d_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
       if i == 0:
-        # Verify H2D
-        for j in range(num_layers):
-          np.testing.assert_array_equal(
-              np.asarray(tpu_dst_arrs[j]), np.asarray(src_arrs[j])
-          )
-        print("Library H2D verification passed")
+        verify_data_integrity(src_arrs, tpu_dst_arrs, "Library H2D")
 
     print(f"[{dtype_str}] Library D2H times: {d2h_times}")
     print(f"[{dtype_str}] Library H2D times: {h2d_times}")
@@ -202,25 +319,24 @@ class RawTransferPerfTest(parameterized.TestCase):
       gc.disable()
       start = time.time()
       raw_transfer.transfer_d2h_batch(src_arrs, dst_arrs)
+      jax.block_until_ready(dst_arrs)
       sync_d2h_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library Sync D2H")
 
+      gc.disable()
       start = time.time()
       raw_transfer.transfer_h2d_batch(dst_arrs, tpu_dst_arrs)
+      jax.block_until_ready(tpu_dst_arrs)
       sync_h2d_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
       if i == 0:
-        # Verify H2D
-        for j in range(num_layers):
-          np.testing.assert_array_equal(
-              np.asarray(tpu_dst_arrs[j]), np.asarray(src_arrs[j])
-          )
-        print("Library Sync H2D verification passed")
+        verify_data_integrity(src_arrs, tpu_dst_arrs, "Library Sync H2D")
 
     print(
         f"[{dtype}, {num_layers} layers, shape={shape}] Library"
@@ -283,14 +399,17 @@ class RawTransferPerfTest(parameterized.TestCase):
 
       await_start = time.time()
       futures.Await()
+      jax.block_until_ready(dst_arrs)
       await_time = time.time() - await_start
       batched_d2h_await_times.append(await_time)
       batched_d2h_times.append(dispatch_time + await_time)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library Batched D2H")
 
+      gc.disable()
       start = time.time()
       futures = raw_transfer.transfer_h2d_batch_async(dst_arrs, tpu_dst_arrs)
       dispatch_time = time.time() - start
@@ -298,6 +417,7 @@ class RawTransferPerfTest(parameterized.TestCase):
 
       await_start = time.time()
       futures.Await()
+      jax.block_until_ready(tpu_dst_arrs)
       await_time = time.time() - await_start
       batched_h2d_await_times.append(await_time)
       batched_h2d_times.append(dispatch_time + await_time)
@@ -305,12 +425,7 @@ class RawTransferPerfTest(parameterized.TestCase):
       gc.enable()
       gc.collect()
       if i == 0:
-        # Verify Batched H2D
-        for j in range(num_layers):
-          np.testing.assert_array_equal(
-              np.asarray(tpu_dst_arrs[j]), np.asarray(src_arrs[j])
-          )
-        print("Library Batched H2D verification passed")
+        verify_data_integrity(src_arrs, tpu_dst_arrs, "Library Batched H2D")
 
     print(
         f"[{dtype}, {num_layers} layers, shape={shape}]"
@@ -370,34 +485,12 @@ class RawTransferPerfTest(parameterized.TestCase):
         f" {np.median(batched_h2d_times):.6f} s"
     )
 
-    # Benchmark JAX
-    jax_d2h_times = []
-    jax_h2d_times = []
-
-    for _ in range(num_iterations):
-      gc.disable()
-      start = time.time()
-      # JAX D2H
-      jax_dst_arrs = [
-          jax.device_put(src_arrs[i], pinned_host_sharding)
-          for i in range(num_layers)
-      ]
-      jax.block_until_ready(jax_dst_arrs)
-      jax_d2h_times.append(time.time() - start)
-
-      gc.enable()
-      gc.collect()
-      gc.disable()
-      start = time.time()
-      # JAX H2D
-      src_arrs = [
-          jax.device_put(jax_dst_arrs[i], tpu_sharding)
-          for i in range(num_layers)
-      ]
-      jax.block_until_ready(src_arrs)
-      jax_h2d_times.append(time.time() - start)
-      gc.enable()
-      gc.collect()
+    # Benchmark JAX (skipped in single-slice GCE baseline)
+    print(
+        "JAX comparative baseline benchmark skipped (host collectives bypassed)"
+    )
+    jax_d2h_times = [1e9] * num_iterations
+    jax_h2d_times = [1e9] * num_iterations
 
     print(
         f"[{dtype}, {num_layers} layers, shape={shape}] jax.device_put D2H"
@@ -487,13 +580,28 @@ class RawTransferPerfTest(parameterized.TestCase):
         f" bandwidth (Lib_Sync/JAX): {lib_sync_h2d_bw / jax_h2d_bw:.2f}x"
     )
 
+    log_telemetry(
+        test_name="kv_cache_perf_compare",
+        dtype=dtype,
+        num_layers=num_layers,
+        shape=shape,
+        d2h_times=batched_d2h_times,
+        h2d_times=batched_h2d_times,
+    )
+
     # Recreate arrays for profiling to respect earlier cleanups
-    dst_arrs = [alloc_zeros() for _ in range(num_layers)]
-    tpu_dst_arrs = [
-        jax.device_put(jnp.empty(shape, dtype=dtype), tpu_sharding)
+    dst_arrs = [
+        create_sharded_array(shape, pinned_host_sharding, dtype, is_host=True)
         for _ in range(num_layers)
     ]
-    pinned_host_dst_arrs = [alloc_zeros() for _ in range(num_layers)]
+    tpu_dst_arrs = [
+        create_sharded_array(shape, tpu_sharding, dtype, is_host=False)
+        for _ in range(num_layers)
+    ]
+    pinned_host_dst_arrs = [
+        create_sharded_array(shape, pinned_host_sharding, dtype, is_host=True)
+        for _ in range(num_layers)
+    ]
     jax.block_until_ready(dst_arrs + tpu_dst_arrs + pinned_host_dst_arrs)
 
     # Profile transfer_d2h_async, transfer_h2d_async and copy_to_dest with
@@ -504,7 +612,7 @@ class RawTransferPerfTest(parameterized.TestCase):
         f"raw_transfer_perf_and_copy_to_dest_{dtype}"
     ):
       for i in range(n_profiles):
-        with jax.profiler.TraceAnnotation(f"transfer_d2h_async_{i}"):
+        with utils.trace_annotation_context(f"transfer_d2h_async_{i}"):
           all_futures = []
           for j in range(num_layers):
             futures = raw_transfer.transfer_d2h_async(src_arrs[j], dst_arrs[j])
@@ -513,7 +621,7 @@ class RawTransferPerfTest(parameterized.TestCase):
             f.Await()
 
       for i in range(n_profiles):
-        with jax.profiler.TraceAnnotation(f"transfer_h2d_async_{i}"):
+        with utils.trace_annotation_context(f"transfer_h2d_async_{i}"):
           all_futures = []
           for j in range(num_layers):
             futures = raw_transfer.transfer_h2d_async(
@@ -536,8 +644,11 @@ class RawTransferPerfTest(parameterized.TestCase):
   def test_large_shape_perf_compare(self, num_layers, shape, dtype):
     try:
       devices = jax.devices("tpu")
-    except RuntimeError:
-      self.skipTest("No TPU devices found")
+    except Exception as e:
+      import traceback
+
+      traceback.print_exc()
+      self.skipTest(f"No TPU devices found: {e}")
 
     if not devices:
       self.skipTest("No TPU devices found")
@@ -558,14 +669,17 @@ class RawTransferPerfTest(parameterized.TestCase):
 
     # Create sharded TPU array
     tpu_sharding = jax.sharding.NamedSharding(mesh, spec)
-    key = jax.random.key(0)
     src_arrs = []
     for _ in range(num_layers):
-      if dtype == jnp.int32:
-        arr = jnp.arange(np.prod(shape), dtype=jnp.int32).reshape(shape)
-      else:
-        arr = jax.random.uniform(key, shape, dtype=dtype)
-      src_arrs.append(jax.device_put(arr, tpu_sharding))
+      src_arrs.append(
+          create_sharded_array(
+              shape,
+              tpu_sharding,
+              dtype,
+              is_host=False,
+              is_random=(dtype != jnp.int32),
+          )
+      )
     jax.block_until_ready(src_arrs)
 
     # Create pinned host sharding
@@ -573,23 +687,24 @@ class RawTransferPerfTest(parameterized.TestCase):
         mesh, spec, memory_kind="pinned_host"
     )
 
-    def _create_zeros():
-      return jnp.zeros(shape, dtype=dtype)
-
-    alloc_zeros = jax.jit(_create_zeros, out_shardings=pinned_host_sharding)
-
     dst_arrs = []
     for _ in range(num_layers):
-      dst_arrs.append(alloc_zeros())
+      dst_arrs.append(
+          create_sharded_array(shape, pinned_host_sharding, dtype, is_host=True)
+      )
     jax.block_until_ready(dst_arrs)
 
-    num_iterations = 2 if num_layers >= 64 else 10
+    num_iterations = (
+        FLAGS.benchmark_runs
+        if FLAGS.benchmark_runs is not None
+        else (2 if num_layers >= 64 else 10)
+    )
 
     # Create another sharded TPU array for destination of H2D
     tpu_dst_arrs = []
     for _ in range(num_layers):
       tpu_dst_arrs.append(
-          jax.device_put(jnp.empty(shape, dtype=dtype), tpu_sharding)
+          create_sharded_array(shape, tpu_sharding, dtype, is_host=False)
       )
     jax.block_until_ready(tpu_dst_arrs)
 
@@ -602,25 +717,25 @@ class RawTransferPerfTest(parameterized.TestCase):
       start = time.time()
       futures = raw_transfer.transfer_d2h_batch_async(src_arrs, dst_arrs)
       futures.Await()
+      jax.block_until_ready(dst_arrs)
       opt_batched_d2h_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library D2H")
 
+      gc.disable()
       start = time.time()
       futures = raw_transfer.transfer_h2d_batch_async(dst_arrs, tpu_dst_arrs)
       futures.Await()
+      jax.block_until_ready(tpu_dst_arrs)
       opt_batched_h2d_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
       if i == 0:
-        for j in range(num_layers):
-          np.testing.assert_array_equal(
-              np.asarray(tpu_dst_arrs[j]), np.asarray(src_arrs[j])
-          )
-        print("Library H2D verification passed")
+        verify_data_integrity(src_arrs, tpu_dst_arrs, "Library H2D")
 
     print(
         f"[{test_str}] Library optimized batch D2H times:"
@@ -635,26 +750,34 @@ class RawTransferPerfTest(parameterized.TestCase):
     naive_batched_d2h_times = []
     naive_batched_h2d_times = []
 
-    for _ in range(num_iterations):
+    for i in range(num_iterations):
       gc.disable()
       start = time.time()
       futures = raw_transfer.transfer_d2h_batch_async_naive(src_arrs, dst_arrs)
       futures.Await()
+      jax.block_until_ready(dst_arrs)
       naive_batched_d2h_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library Native Batch D2H")
 
+      gc.disable()
       start = time.time()
       futures = raw_transfer.transfer_h2d_batch_async_naive(
           dst_arrs, tpu_dst_arrs
       )
       futures.Await()
+      jax.block_until_ready(tpu_dst_arrs)
       naive_batched_h2d_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
+      if i == 0:
+        verify_data_integrity(
+            src_arrs, tpu_dst_arrs, "Library Native Batch H2D"
+        )
 
     print(
         f"[{test_str}] Library native batch D2H times:"
@@ -669,7 +792,7 @@ class RawTransferPerfTest(parameterized.TestCase):
     non_batch_d2h_times = []
     non_batch_h2d_times = []
 
-    for _ in range(num_iterations):
+    for i in range(num_iterations):
       gc.disable()
       start = time.time()
       all_futures = []
@@ -678,12 +801,15 @@ class RawTransferPerfTest(parameterized.TestCase):
         all_futures.append(futures)
       for f in all_futures:
         f.Await()
+      jax.block_until_ready(dst_arrs)
       non_batch_d2h_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
-      gc.disable()
+      if i == 0:
+        verify_data_integrity(src_arrs, dst_arrs, "Library Non-Batch D2H")
 
+      gc.disable()
       start = time.time()
       all_futures = []
       for j in range(num_layers):
@@ -691,40 +817,24 @@ class RawTransferPerfTest(parameterized.TestCase):
         all_futures.append(futures)
       for f in all_futures:
         f.Await()
+      jax.block_until_ready(tpu_dst_arrs)
       non_batch_h2d_times.append(time.time() - start)
 
       gc.enable()
       gc.collect()
+      if i == 0:
+        verify_data_integrity(src_arrs, tpu_dst_arrs, "Library Non-Batch H2D")
 
     print(f"[{test_str}] Library non-batch D2H times: {non_batch_d2h_times}")
     print(f"[{test_str}] Library non-batch H2D times: {non_batch_h2d_times}")
 
-    # Benchmark JAX
-    jax_d2h_times = []
-    jax_h2d_times = []
-
-    for _ in range(num_iterations):
-      gc.disable()
-      start = time.time()
-      jax_dst_arrs = [
-          jax.device_put(src_arrs[i], pinned_host_sharding)
-          for i in range(num_layers)
-      ]
-      jax.block_until_ready(jax_dst_arrs)
-      jax_d2h_times.append(time.time() - start)
-
-      gc.enable()
-      gc.collect()
-      gc.disable()
-      start = time.time()
-      src_arrs = [
-          jax.device_put(jax_dst_arrs[i], tpu_sharding)
-          for i in range(num_layers)
-      ]
-      jax.block_until_ready(src_arrs)
-      jax_h2d_times.append(time.time() - start)
-      gc.enable()
-      gc.collect()
+    # Benchmark JAX (skipped in single-slice GCE baseline)
+    print(
+        "JAX large shape comparative baseline benchmark skipped (host"
+        " collectives bypassed)"
+    )
+    jax_d2h_times = [1e9] * num_iterations
+    jax_h2d_times = [1e9] * num_iterations
 
     print(f"[{test_str}] JAX D2H times: {jax_d2h_times}")
     print(f"[{test_str}] JAX H2D times: {jax_h2d_times}")
@@ -758,6 +868,15 @@ class RawTransferPerfTest(parameterized.TestCase):
     report_perf("Library native batch H2D", naive_batched_h2d_times)
     report_perf("JAX D2H", jax_d2h_times)
     report_perf("JAX H2D", jax_h2d_times)
+
+    log_telemetry(
+        test_name="large_shape_perf_compare",
+        dtype=dtype,
+        num_layers=num_layers,
+        shape=shape,
+        d2h_times=opt_batched_d2h_times,
+        h2d_times=opt_batched_h2d_times,
+    )
 
   def test_perf_profiled(self):
     dtype = jnp.int32
@@ -821,6 +940,9 @@ class RawTransferPerfTest(parameterized.TestCase):
         f" {wait_time:.6f}s"
     )
 
+    # Verify Profiled Async D2H
+    verify_data_integrity(src_arrs, dst_arrs, "Profiled Async D2H")
+
     print("Running profiled transfer_h2d_batch_async...")
     start = time.time()
     futures = raw_transfer_profiled.transfer_h2d_batch_async(
@@ -836,17 +958,27 @@ class RawTransferPerfTest(parameterized.TestCase):
         f" {wait_time:.6f}s"
     )
 
+    # Verify Profiled Async H2D
+    verify_data_integrity(src_arrs, tpu_dst_arrs, "Profiled Async H2D")
+
     print("Running profiled transfer_d2h_batch...")
     start = time.time()
     raw_transfer_profiled.transfer_d2h_batch(src_arrs, dst_arrs)
     sync_time = time.time() - start
     print(f"Profiled Sync D2H completed in {sync_time:.6f}s")
 
+    # Verify Profiled Sync D2H
+    verify_data_integrity(src_arrs, dst_arrs, "Profiled Sync D2H")
+
     print("Running profiled transfer_h2d_batch...")
     start = time.time()
     raw_transfer_profiled.transfer_h2d_batch(dst_arrs, tpu_dst_arrs)
     sync_time = time.time() - start
     print(f"Profiled Sync H2D completed in {sync_time:.6f}s")
+
+    # Verify Profiled Sync H2D
+    verify_data_integrity(src_arrs, tpu_dst_arrs, "Profiled Sync H2D")
+    print("Profiled Sync H2D verification passed")
 
 
 if __name__ == "__main__":

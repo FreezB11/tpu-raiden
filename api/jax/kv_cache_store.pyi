@@ -1,7 +1,13 @@
 from typing import Any
 
 class KVCacheStore:
-  def __init__(self, block_size: int, capacity: int) -> None: ...
+  def __init__(
+      self,
+      block_size: int,
+      capacity: int,
+      global_registry_address: str = "",
+      local_address: str = "",
+  ) -> None: ...
   def lookup_and_fetch(
       self,
       block_hashes: list[int],

@@ -32,13 +32,15 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core:raiden_manager_base",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "//core:raw_transfer_core",
+        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt/c:pjrt_c_api_hdrs",
+        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_extension_hdrs",
         "@xla//xla/pjrt/c_api_client:pjrt_c_api_client",
-        "@xla//xla/stream_executor:stream",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
     ],
@@ -58,7 +60,6 @@ cc_test(
     linkopts = ["-Wl,--allow-shlib-undefined"],
     deps = [
         ":weight_synchronizer_base",
-        "//third_party/python_runtime:embedded_interpreter",  # keep
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",

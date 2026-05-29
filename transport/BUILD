@@ -19,6 +19,30 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
+    name = "block_transport",
+    srcs = ["block_transport.cc"],
+    hdrs = ["block_transport.h"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = ["-use_header_modules"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/platform:statusor",
+    ],
+)
+
+cc_library(
     name = "socket_transport",
     srcs = ["socket_transport.cc"],
     hdrs = ["socket_transport.h"],
@@ -28,8 +52,8 @@ cc_library(
     ],
     features = ["-use_header_modules"],
     deps = [
-        "//third_party/mlcl/src/api:transport",
-        "//third_party/mlcl/src/api:types",
+        "//third_party/peregrine/src/api:transport",
+        "//third_party/peregrine/src/api:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
@@ -50,10 +74,26 @@ cc_test(
     features = ["-use_header_modules"],
     deps = [
         ":socket_transport",
-        "//third_party/mlcl/src/api:transport",
-        "//third_party/mlcl/src/api:types",
+        "//third_party/peregrine/src/api:transport",
+        "//third_party/peregrine/src/api:types",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "block_transport_test",
+    srcs = ["block_transport_test.cc"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = ["-use_header_modules"],
+    deps = [
+        ":block_transport",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
     ],

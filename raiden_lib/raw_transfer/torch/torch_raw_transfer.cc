@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
-
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -28,13 +26,13 @@
 #include "pybind11/gil.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
+#include "xla/pjrt/pjrt_client.h"
+#include "core/raw_transfer_core.h"
 #include "torch/extension.h"  // IWYU pragma: keep
 #include "torch/headeronly/core/DeviceType.h"
 #include "torch_tpu/eager/device_buffer.h"
 #include "torch_tpu/eager/materialize.h"
-#include "torch_tpu/eager/structured_log_buffer.h"
 #include "torch_tpu/eager/tensor_to_buffer.h"
-#include "xla/pjrt/pjrt_client.h"
 
 namespace py = pybind11;
 
@@ -194,8 +192,7 @@ torch_tpu::DeviceBufferRef GetMaterializedBufferRef(const at::Tensor& tensor) {
 }
 
 xla::PjRtBuffer* GetPjRtBuffer(const torch_tpu::DeviceBufferRef& buffer_ref) {
-  return ValueOrThrow("Failed to get PjRtBuffer",
-                      buffer_ref.GetOrMaterializeBuffer());
+  return ValueOrThrow("Failed to get PjRtBuffer", buffer_ref.AwaitBuffer());
 }
 
 void AwaitReady(xla::PjRtBuffer* buffer, const char* role) {

@@ -24,13 +24,15 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <string>
-#include <utility>
+#include <string_view>
 
 #include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "third_party/peregrine/src/api/types.h"
 
 namespace tpu_raiden {
 namespace transport {
@@ -135,7 +137,7 @@ SocketTransport::~SocketTransport() {
 }
 
 absl::StatusOr<int> SocketTransport::GetOrCreateConnection(
-    mlcl::Endpoint peer) {
+    std::string_view peer) {
   std::string peer_str(peer);
   {
     absl::MutexLock _(&conn_mu_);
@@ -162,33 +164,35 @@ absl::StatusOr<int> SocketTransport::GetOrCreateConnection(
   int opt = 1;
   setsockopt(sock_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-  struct hostent* server = gethostbyname(host.c_str());
-  if (server == nullptr) {
+  struct addrinfo hints;
+  struct addrinfo* res;
+  std::memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+
+  std::string port_str = std::to_string(port);
+  int err = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res);
+  if (err != 0) {
     close(sock_fd);
-    return absl::InvalidArgumentError(
-        absl::StrCat("Failed to resolve hostname: ", host));
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Failed to resolve hostname '", host, "': ", gai_strerror(err)));
   }
 
-  struct sockaddr_in serv_addr;
-  std::memset(&serv_addr, 0, sizeof(serv_addr));
-  serv_addr.sin_family = AF_INET;
-  std::memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
-  serv_addr.sin_port = htons(port);
-
-  if (connect(sock_fd, reinterpret_cast<struct sockaddr*>(&serv_addr),
-              sizeof(serv_addr)) < 0) {
+  if (connect(sock_fd, res->ai_addr, res->ai_addrlen) < 0) {
+    freeaddrinfo(res);
     close(sock_fd);
     return absl::UnavailableError(absl::StrCat(
         "Failed to connect to peer ", peer_str, ": ", std::strerror(errno)));
   }
+  freeaddrinfo(res);
 
   absl::MutexLock _(&conn_mu_);
   connection_pool_[peer_str] = sock_fd;
   return sock_fd;
 }
 
-absl::StatusOr<mlcl::Handle> SocketTransport::Post(
-    mlcl::Endpoint peer, const mlcl::Request& request) {
+absl::StatusOr<peregrine::Handle> SocketTransport::Post(
+    std::string_view peer, const peregrine::Request& request) {
   if (!request.IsValid()) {
     return absl::InvalidArgumentError(
         absl::StrCat("Invalid transport request: ", request.ToString()));
@@ -200,17 +204,17 @@ absl::StatusOr<mlcl::Handle> SocketTransport::Post(
   }
   int fd = status_or_fd.value();
 
-  mlcl::Handle handle;
+  peregrine::Handle handle;
   {
     absl::MutexLock _(&mu_);
-    handle = mlcl::Handle(++handle_counter_);
-    status_map_[handle] = mlcl::Status::kInProgress;
+    handle = peregrine::Handle(++handle_counter_);
+    status_map_[handle] = peregrine::Status::kInProgress;
   }
 
   absl::Status op_status;
-  if (request.op == mlcl::Op::kWrite) {
+  if (request.op == peregrine::Op::kWrite) {
     op_status = DispatchWrite(fd, request);
-  } else if (request.op == mlcl::Op::kRead) {
+  } else if (request.op == peregrine::Op::kRead) {
     op_status = DispatchReadRequest(fd, request);
   } else {
     op_status = absl::InternalError("Unsupported transport operation");
@@ -218,18 +222,18 @@ absl::StatusOr<mlcl::Handle> SocketTransport::Post(
 
   absl::MutexLock _(&mu_);
   if (op_status.ok()) {
-    status_map_[handle] = mlcl::Status::kSuccess;
+    status_map_[handle] = peregrine::Status::kSuccess;
   } else {
-    status_map_[handle] = mlcl::Status::kFailure;
+    status_map_[handle] = peregrine::Status::kFailure;
   }
 
   return handle;
 }
 
 absl::Status SocketTransport::DispatchWrite(int fd,
-                                            const mlcl::Request& request) {
+                                            const peregrine::Request& request) {
   PacketHeader header;
-  header.op = mlcl::Op::kWrite;
+  header.op = peregrine::Op::kWrite;
   header.remote_addr = reinterpret_cast<uint64_t>(request.raddr);
   header.local_addr = 0;
   header.length = request.len;
@@ -247,9 +251,9 @@ absl::Status SocketTransport::DispatchWrite(int fd,
 }
 
 absl::Status SocketTransport::DispatchReadRequest(
-    int fd, const mlcl::Request& request) {
+    int fd, const peregrine::Request& request) {
   PacketHeader header;
-  header.op = mlcl::Op::kRead;
+  header.op = peregrine::Op::kRead;
   header.remote_addr = reinterpret_cast<uint64_t>(request.raddr);
   header.local_addr = reinterpret_cast<uint64_t>(request.laddr);
   header.length = request.len;
@@ -269,15 +273,15 @@ absl::Status SocketTransport::DispatchReadRequest(
   return ReadExact(fd, request.laddr, resp_header.length);
 }
 
-absl::StatusOr<mlcl::Status> SocketTransport::Poll(mlcl::Handle handle) {
+absl::StatusOr<peregrine::Status> SocketTransport::Poll(peregrine::Handle handle) {
   absl::MutexLock _(&mu_);
   auto it = status_map_.find(handle);
   if (it == status_map_.end()) {
     return absl::NotFoundError(
         absl::StrCat("Transport handle not found: ", handle.value()));
   }
-  mlcl::Status s = it->second;
-  if (mlcl::IsCompleted(s)) {
+  peregrine::Status s = it->second;
+  if (peregrine::IsCompleted(s)) {
     status_map_.erase(it);
   }
   return s;
@@ -339,7 +343,7 @@ void SocketTransport::ConnectionWorker(int client_fd) {
       break;  // connection closed or failed
     }
 
-    if (header.op == mlcl::Op::kWrite) {
+    if (header.op == peregrine::Op::kWrite) {
       uint8_t* dest_ptr = reinterpret_cast<uint8_t*>(header.remote_addr);
       s = ReadExact(client_fd, dest_ptr, header.length);
       if (!s.ok()) {
@@ -349,12 +353,12 @@ void SocketTransport::ConnectionWorker(int client_fd) {
       uint8_t ack = 1;
       s = WriteExact(client_fd, &ack, 1);
       if (!s.ok()) break;
-    } else if (header.op == mlcl::Op::kRead) {
+    } else if (header.op == peregrine::Op::kRead) {
       // Read local memory to send back as a response write packet
       uint8_t* src_ptr = reinterpret_cast<uint8_t*>(header.remote_addr);
 
       PacketHeader resp_header;
-      resp_header.op = mlcl::Op::kWrite;
+      resp_header.op = peregrine::Op::kWrite;
       resp_header.remote_addr = header.local_addr;
       resp_header.local_addr = 0;
       resp_header.length = header.length;

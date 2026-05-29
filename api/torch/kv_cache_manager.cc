@@ -27,6 +27,7 @@
 #include "kv_cache/kv_cache_manager_base.h"
 #include "torch_tpu/eager/device_buffer.h"
 #include "torch_tpu/eager/materialize.h"
+#include "torch_tpu/eager/tensor_to_buffer.h"
 
 namespace tpu_raiden {
 namespace torch {
@@ -63,7 +64,7 @@ std::vector<std::vector<xla::PjRtBuffer*>> UnpackTorchTensors(
       }
 
       // Materialize the underlying PyTorch TPU DeviceBufferRef E2E
-      auto status_or_ref = torch_tpu::GetMaterialized(
+      auto status_or_ref = torch_tpu::MaterializeAndReturn(
           tensor, torch_tpu::MaterializationReason::kCpuTransfer);
       if (!status_or_ref.ok()) {
         throw std::runtime_error("Failed to materialize TPU tensor: " +
@@ -72,7 +73,7 @@ std::vector<std::vector<xla::PjRtBuffer*>> UnpackTorchTensors(
       torch_tpu::DeviceBufferRef buffer_ref = std::move(status_or_ref.value());
 
       // Extract raw PjRtBuffer device pointer
-      auto status_or_buf = buffer_ref.GetOrMaterializeBuffer();
+      auto status_or_buf = buffer_ref.AwaitBuffer();
       if (!status_or_buf.ok()) {
         throw std::runtime_error(
             "Failed to fetch PjRtBuffer from TPU reference: " +

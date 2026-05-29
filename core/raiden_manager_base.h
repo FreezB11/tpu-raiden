@@ -25,17 +25,18 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "transport/block_transport.h"
 
 namespace tpu_raiden {
 
-class RaidenManagerBase {
+class RaidenManagerBase : public tpu_raiden::transport::BlockTransportDelegate {
  public:
   RaidenManagerBase(size_t num_layers, size_t num_shards,
                     size_t slice_byte_size, int block_size = 1,
                     std::optional<int> local_port = std::nullopt,
                     int parallelism = 1);
 
-  virtual ~RaidenManagerBase();
+  ~RaidenManagerBase() override;
 
   // Direct C++ H2H network write (Push)
   absl::StatusOr<std::vector<int>> H2hWriteDirect(
@@ -53,15 +54,20 @@ class RaidenManagerBase {
 
   std::optional<int> local_port() const;
 
+  uint8_t* GetHostPointer(size_t layer_idx, size_t shard_idx) override;
+  size_t GetHostSize(size_t layer_idx, size_t shard_idx) override;
+
   const uint8_t* GetHostPointer(size_t layer_idx, size_t shard_idx) const;
 
   void SetExternalHostPointers(const std::vector<const uint8_t*>& host_ptrs,
                                const std::vector<size_t>& host_sizes);
 
-  size_t num_layers() const { return num_layers_; }
-  size_t num_shards() const { return num_shards_; }
-  size_t slice_byte_size() const { return slice_byte_size_; }
-  int block_size() const { return block_size_; }
+  // Delegate overrides E2E
+  size_t num_layers() const override { return num_layers_; }
+  size_t num_shards() const override { return num_shards_; }
+  size_t slice_byte_size() const override { return slice_byte_size_; }
+  int block_size() const override { return block_size_; }
+  size_t shard_factor() const override { return shard_factor_; }
 
  protected:
   struct ShardBufferInfoBase {
@@ -84,34 +90,21 @@ class RaidenManagerBase {
   size_t shard_factor_ = 1;
   int64_t major_dim_size_ = 0;
 
-  struct BlockTransportServer;
-  std::unique_ptr<BlockTransportServer> server_;
+  std::unique_ptr<tpu_raiden::transport::BlockTransport> server_;
 
   std::vector<LayerInfoBase> layers_;
 
-  // Virtual hooks letting subclasses declare their own dynamic allocators if
-  // needed E2E!
-  virtual absl::StatusOr<std::vector<int>> AllocateBlocks(size_t num_blocks,
-                                                          int64_t entity_id) {
+  // Delegate allocator overrides
+  absl::StatusOr<std::vector<int>> AllocateBlocks(size_t num_blocks,
+                                                  int64_t entity_id) override {
     return absl::UnimplementedError("Block allocator is not available");
   }
 
-  virtual int GetRemoteReadBlockId(int base_remote_id, int chunk_k) {
+  int GetRemoteReadBlockId(int base_remote_id, int chunk_k) override {
     return base_remote_id + chunk_k;
   }
 
-  virtual absl::Status OnDataReceived() { return absl::OkStatus(); }
-
-  void H2hWriteWorker(int stream_idx, const std::string& peer,
-                      size_t blocks_per_stream,
-                      const std::vector<int>& src_block_ids,
-                      std::vector<int>& allocated_ids,
-                      std::vector<absl::Status>& statuses);
-
-  void H2hReadWorker(int stream_idx, const std::string& peer,
-                     size_t blocks_per_stream, size_t remote_blocks_per_stream,
-                     int base_remote_id, const std::vector<int>& allocated_ids,
-                     std::vector<absl::Status>& statuses);
+  absl::Status OnDataReceived() override { return absl::OkStatus(); }
 };
 
 }  // namespace tpu_raiden

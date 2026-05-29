@@ -25,14 +25,22 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/pjrt/c/pjrt_c_api.h"
+#include "xla/pjrt/c/pjrt_c_api_raw_buffer_extension.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/stream_executor/stream.h"
 #include "core/raiden_manager_base.h"
+#include "core/raw_transfer_core.h"
 #include "kv_cache/logical_block_manager.h"
-#include "raiden_lib/raw_transfer/raw_transfer_impl.h"
 
 namespace tpu_raiden {
 namespace kv_cache {
+
+struct KVCacheCopySpec {
+  std::vector<int64_t> src_offsets;
+  std::vector<int64_t> dst_offsets;
+  std::vector<int64_t> sizes;
+};
 
 class KVCacheManagerBase : public tpu_raiden::RaidenManagerBase {
  public:
@@ -83,6 +91,11 @@ class KVCacheManagerBase : public tpu_raiden::RaidenManagerBase {
       std::string peer, const std::vector<int>& src_block_ids,
       int64_t entity_id = 0);
 
+  absl::StatusOr<raiden::PjRtCopyFuture> H2hReadExplicit(
+      std::string peer, const std::vector<int>& src_block_ids,
+      const std::vector<int>& local_block_ids,
+      const std::vector<uint8_t*>& explicit_dst_ptrs);
+
   // Pure StreamExecutor H2D copy using raw C++ device pointers
   absl::Status H2dDirect(stream_executor::Stream* stream,
                          const std::vector<uint8_t*>& device_buffers,
@@ -107,8 +120,28 @@ class KVCacheManagerBase : public tpu_raiden::RaidenManagerBase {
       const std::vector<int64_t>& dst_offsets = {},
       const std::vector<int64_t>& copy_sizes = {}, int64_t device_id = -1);
 
+  // Layer-wise copies using caller-owned host buffers. The raw copy operation
+  // captures the supplied address when issued, so independent calls can overlap
+  // across layers.
+  // NOTE: These functions are temporary. Long-term, KVCacheManager should own
+  // these host buffers to enable serving prefix cache lookups directly from
+  // RAM.
+  absl::StatusOr<raiden::PjRtCopyFuture> D2hTo(size_t layer_idx,
+                                               void* dst_host_ptr,
+                                               size_t dst_size,
+                                               const KVCacheCopySpec& copy_spec,
+                                               size_t shard_idx = 0);
+
+  // NOTE: This function is temporary. See D2hTo() for details.
+  absl::StatusOr<raiden::PjRtCopyFuture> H2dFrom(
+      size_t layer_idx, const void* src_host_ptr, size_t src_size,
+      const KVCacheCopySpec& copy_spec, size_t shard_idx = 0);
+
   void SetExternalHostBuffer(
       const std::vector<raiden::BufferHoldAndAlias>& buffer_holds);
+
+  // Returns the internal LogicalBlockManager.
+  LogicalBlockManager* block_manager() const { return block_manager_.get(); }
 
  protected:
   const PJRT_Api* c_api_ = nullptr;

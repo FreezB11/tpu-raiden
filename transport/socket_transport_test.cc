@@ -25,20 +25,21 @@
 #include <gtest/gtest.h>
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "third_party/mlcl/src/api/types.h"
+#include "third_party/peregrine/src/api/transport.h"
+#include "third_party/peregrine/src/api/types.h"
 
 namespace tpu_raiden {
 namespace transport {
 namespace {
 
 // Helper to poll completion with a bounding timeout.
-bool PollUntilDone(mlcl::Transport* transport, mlcl::Handle handle,
+bool PollUntilDone(peregrine::Transport* transport, peregrine::Handle handle,
                    int timeout_ms = 5000) {
   auto start = std::chrono::steady_clock::now();
   while (true) {
     auto status_or_s = transport->Poll(handle);
-    if (status_or_s.ok() && mlcl::IsCompleted(status_or_s.value())) {
-      return status_or_s.value() == mlcl::Status::kSuccess;
+    if (status_or_s.ok() && peregrine::IsCompleted(status_or_s.value())) {
+      return status_or_s.value() == peregrine::Status::kSuccess;
     }
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::steady_clock::now() - start)
@@ -63,9 +64,9 @@ TEST(SocketTransportTest, PointToPointWriteTransfer) {
       "Hello Distributed KV Cache Transfer via POSIX TCP!";
   std::vector<uint8_t> dst_payload(src_payload.size(), 0);
 
-  // Prepare mlcl Request struct mapping remote memory pointers cleanly.
-  mlcl::Request request;
-  request.op = mlcl::Op::kWrite;
+  // Prepare peregrine Request struct mapping remote memory pointers cleanly.
+  peregrine::Request request;
+  request.op = peregrine::Op::kWrite;
   request.laddr = reinterpret_cast<uint8_t*>(src_payload.data());
   request.raddr = dst_payload.data();
   request.len = src_payload.size();
@@ -95,8 +96,8 @@ TEST(SocketTransportTest, PointToPointReadTransfer) {
   std::string remote_payload = "Remote data sequence ready to pull!";
   std::vector<uint8_t> local_payload(remote_payload.size(), 0);
 
-  mlcl::Request request;
-  request.op = mlcl::Op::kRead;
+  peregrine::Request request;
+  request.op = peregrine::Op::kRead;
   request.laddr = local_payload.data();
   request.raddr = reinterpret_cast<uint8_t*>(remote_payload.data());
   request.len = remote_payload.size();

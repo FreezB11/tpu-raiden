@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/flags/flag.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -29,6 +30,10 @@
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+
+ABSL_FLAG(size_t, raiden_weight_sync_host_buffer_scratchpad_size, 256 * 1024,
+          "Amount of scratchpad to allocate to host buffers for resharding "
+          "pulls.");
 
 namespace tpu_raiden {
 namespace weight_sync {
@@ -88,7 +93,7 @@ WeightSynchronizerBase::WeightSynchronizerBase(
       // to the physical size!
       size_t alloc_size =
           physical_size_ +
-          256 * 1024;  // add 256KB scratch pad for resharding pulls
+          absl::GetFlag(FLAGS_raiden_weight_sync_host_buffer_scratchpad_size);
       if (external_host_ptrs.has_value()) {
         if (shard_idx < external_host_ptrs->size()) {
           shard_info.host_ptr = (*external_host_ptrs)[shard_idx];
@@ -145,7 +150,11 @@ WeightSynchronizerBase::WeightSynchronizerBase(
     for (size_t i = 0; i < num_shards_; ++i) {
       ShardBufferInfoBase shard_info;
 
-      size_t alloc_size = physical_size_;
+      size_t alloc_size =
+          physical_size_ +
+          absl::GetFlag(FLAGS_raiden_weight_sync_host_buffer_scratchpad_size);
+      std::cerr << "[C++ WS] CPU-only constructor: physical_size_="
+                << physical_size_ << ", alloc_size=" << alloc_size << std::endl;
       void* ptr = nullptr;
       if (alloc_size > 0) {
         if (posix_memalign(&ptr, 64, alloc_size) != 0) {

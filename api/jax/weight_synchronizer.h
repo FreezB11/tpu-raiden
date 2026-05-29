@@ -35,6 +35,8 @@ namespace jax {
 
 class WeightSynchronizer : public weight_sync::WeightSynchronizerBase {
  public:
+  using WeightSynchronizerBase::WeightSynchronizerBase;
+
   // Constructor taking JAX Array python list E2E
   WeightSynchronizer(const nb::list& jax_arrays,
                      std::optional<int> local_port = std::nullopt,

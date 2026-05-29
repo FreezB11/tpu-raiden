@@ -23,7 +23,7 @@
 #include "pybind11/stl.h"
 #include "absl/status/statusor.h"
 #include "api/torch/kv_cache_manager.h"
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
+#include "core/raw_transfer_core.h"
 #include "torch/extension.h"
 
 namespace py = pybind11;
@@ -32,6 +32,11 @@ using ::tpu_raiden::torch::KVCacheManager;
 
 // Pybind11 FFI bindings module definition for PyTorch E2E
 PYBIND11_MODULE(_kv_cache_manager, m) {
+  py::class_<::raiden::PjRtCopyFuture>(m, "PjRtCopyFuture")
+      .def("Await", &::raiden::PjRtCopyFuture::Await,
+           py::call_guard<py::gil_scoped_release>())
+      .def("IsReady", &::raiden::PjRtCopyFuture::IsReady);
+
   py::class_<KVCacheManager>(m, "KVCacheManager")
       .def(py::init<const std::vector<std::vector<at::Tensor>>&, int,
                     std::optional<int>, std::optional<int>,

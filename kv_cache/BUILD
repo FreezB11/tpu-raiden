@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -58,11 +57,13 @@ cc_library(
     deps = [
         ":logical_block_manager",
         "//core:raiden_manager_base",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "//core:raw_transfer_core",
+        "//core:xla_raw_transfer_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt/c:pjrt_c_api_hdrs",
+        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_extension_hdrs",
         "@xla//xla/stream_executor:stream",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:statusor",
@@ -70,30 +71,12 @@ cc_library(
     alwayslink = 1,
 )
 
-nanobind_extension(
-    name = "kv_cache_manager",
-    srcs = [
-        "kv_cache_manager_pybind.cc",
-    ],
-    copts = [
-        "-fno-strict-aliasing",
-        "-fexceptions",
-    ],
-    features = ["-use_header_modules"],
-    deps = [
-        ":kv_cache_manager_lib",
-        "@nanobind",
-        "@xla//xla/pjrt:pjrt_client",
-        "@xla//xla/pjrt:status_casters",
-        "@xla//xla/pjrt/c_api_client:pjrt_c_api_client",
-        "@xla//xla/tsl/platform:errors",
-    ],
-)
-
-nanobind_extension(
+cc_library(
     name = "kv_cache_store",
     srcs = [
         "kv_cache_store.cc",
+    ],
+    hdrs = [
         "kv_cache_store.h",
     ],
     copts = [
@@ -101,15 +84,22 @@ nanobind_extension(
         "-fexceptions",
     ],
     features = ["-use_header_modules"],
+    visibility = ["//visibility:public"],
     deps = [
-        ":kv_cache_manager_lib",
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        ":kv_cache_manager_base",
+        ":logical_block_manager",
+        "//core:raw_transfer_core",
+        "//kv_cache/global_registry:global_registry_client_cc",
+        "//net/grpc:grpc++",
+        "//third_party/grpc:grpc++",
+        "//transport:block_transport",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_macros",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
-        "@nanobind",
-        "@xla//xla/pjrt:status_casters",
     ],
 )
 

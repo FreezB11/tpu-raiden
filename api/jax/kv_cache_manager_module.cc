@@ -17,9 +17,9 @@
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
-#include "api/jax/nb_status.h"
 #include "api/jax/kv_cache_manager.h"
-#include "raiden_lib/raw_transfer/raw_transfer_core.h"
+#include "api/jax/nb_statusor.h"
+#include "core/raw_transfer_core.h"
 
 namespace nb = nanobind;
 
@@ -57,7 +57,10 @@ NB_MODULE(_kv_cache_manager, m) {
            nb::arg("peer"), nb::arg("src_block_ids"), nb::arg("entity_id") = 0)
       .def("local_port", &tpu_raiden::kv_cache::KVCacheManagerBase::local_port)
       .def("get_host_pointer",
-           &tpu_raiden::kv_cache::KVCacheManagerBase::GetHostPointer,
+           static_cast<const uint8_t* (
+               tpu_raiden::kv_cache::KVCacheManagerBase::*)(size_t, size_t)
+                           const>(
+               &tpu_raiden::kv_cache::KVCacheManagerBase::GetHostPointer),
            nb::arg("layer_idx"), nb::arg("shard_idx"))
       .def_prop_ro("num_layers",
                    &tpu_raiden::kv_cache::KVCacheManagerBase::num_layers)

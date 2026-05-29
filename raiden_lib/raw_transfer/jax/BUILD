@@ -13,7 +13,7 @@
 # limitations under the License.
 
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -23,8 +23,9 @@ py_library(
     name = "utils",
     srcs = ["utils.py"],
     deps = [
+        "@com_google_absl_py//absl/flags",
         "@jax//jax",
-        "@numpy//numpy",
+        "@pypi//numpy",
     ],
 )
 
@@ -39,120 +40,9 @@ nanobind_extension(
     ],
     features = ["-use_header_modules"],
     deps = [
-        "//raiden_lib/raw_transfer:raw_transfer_impl",
+        "//api/jax:jax_utils",
+        "//core:raw_transfer_impl",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@jax//jaxlib:py_client",
-        "@nanobind",
-        "@rules_python//python/cc:current_py_cc_headers",
-        "@xla//xla:future",
-        "@xla//xla:shape_util",
-        "@xla//xla/pjrt:common_pjrt_client",
-        "@xla//xla/pjrt:pjrt_client",
-        "@xla//xla/pjrt:pjrt_layout",
-        "@xla//xla/pjrt:raw_buffer",
         "@xla//xla/pjrt:status_casters",
-        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_external",
-        "@xla//xla/pjrt/c_api_client:pjrt_c_api_client",
-        "@xla//xla/python/ifrt",
-        "@xla//xla/python/pjrt_ifrt",
-        "@xla//xla/tsl/concurrency:ref_count",
-        "@xla//xla/tsl/platform:errors",
-        "@xla//xla/tsl/platform:logging",
-        "@xla//xla/tsl/platform:statusor",
-    ],
-)
-
-py_test(
-    name = "raw_transfer_perf_gl",
-    timeout = "long",
-    srcs = ["raw_transfer_perf_test.py"],
-    main = "raw_transfer_perf_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostlite:8",
-        "requires-net:external",
-    ],
-    deps = [
-        ":raw_transfer",
-        ":raw_transfer_profiled",
-        ":utils",
-        "//learning/brain/research/jax:tpu_support",
-        "//perftools/accelerators/xprof/api/python:traceme",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
-        "@jax//jax",
-        "@numpy//numpy",
-    ],
-)
-
-py_test(
-    name = "raw_transfer_perf_gf",
-    timeout = "long",
-    srcs = ["raw_transfer_perf_test.py"],
-    main = "raw_transfer_perf_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostfish:4",
-        "requires-net:external",
-    ],
-    deps = [
-        ":raw_transfer",
-        ":raw_transfer_profiled",
-        ":utils",
-        "//learning/brain/research/jax:tpu_support",
-        "//perftools/accelerators/xprof/api/python:traceme",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
-        "@jax//jax",
-        "@numpy//numpy",
-    ],
-)
-
-py_test(
-    name = "raw_transfer_test_gl",
-    timeout = "long",
-    srcs = ["raw_transfer_test.py"],
-    main = "raw_transfer_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostlite:8",
-        "requires-net:external",
-    ],
-    deps = [
-        ":raw_transfer",
-        "//learning/brain/research/jax:tpu_support",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
-        "@jax//jax",
-        "@numpy//numpy",
-    ],
-)
-
-py_test(
-    name = "raw_transfer_test_gf",
-    timeout = "long",
-    srcs = ["raw_transfer_test.py"],
-    main = "raw_transfer_test.py",
-    tags = [
-        "cpu:8",
-        "notap",
-        "requires-accel-hbm",
-        "requires-ghostfish:4",
-        "requires-net:external",
-    ],
-    deps = [
-        ":raw_transfer",
-        "//learning/brain/research/jax:tpu_support",
-        "@com_google_absl_py//absl/testing:absltest",
-        "@com_google_absl_py//absl/testing:parameterized",
-        "@jax//jax",
-        "@numpy//numpy",
     ],
 )

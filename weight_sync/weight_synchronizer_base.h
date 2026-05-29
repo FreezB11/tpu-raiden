@@ -17,18 +17,17 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/pjrt/c/pjrt_c_api.h"
+#include "xla/pjrt/c/pjrt_c_api_raw_buffer_extension.h"
 #include "xla/pjrt/pjrt_client.h"
-#include "xla/stream_executor/stream.h"
 #include "core/raiden_manager_base.h"
-#include "raiden_lib/raw_transfer/raw_transfer_impl.h"
+#include "core/raw_transfer_core.h"
 
 namespace tpu_raiden {
 namespace weight_sync {

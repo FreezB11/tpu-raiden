@@ -35,6 +35,7 @@ os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=16"
 from absl.testing import absltest
 import jax
 import jax.numpy as jnp
+from jax.experimental import multihost_utils
 from api.jax import resharding_engine
 from api.jax import resharding_test_lib
 import numpy as np
@@ -89,8 +90,12 @@ class ReshardingIntegrationTest(absltest.TestCase):
     jax.block_until_ready(dst_sharded_array)
 
     # Assert parity
+    local_dst_view = multihost_utils.global_array_to_host_local_array(
+        dst_sharded_array, dst_mesh, jax.sharding.PartitionSpec("y", None)
+    )
+    gathered_dst = multihost_utils.process_allgather(local_dst_view)
     np.testing.assert_array_equal(
-        np.asarray(dst_sharded_array), np.asarray(global_data)
+        np.squeeze(np.asarray(gathered_dst), axis=0), np.asarray(global_data)
     )
 
   def test_reshard_2D_2x2_to_1D_1x4(self):
@@ -138,8 +143,12 @@ class ReshardingIntegrationTest(absltest.TestCase):
       self.assertEqual(shard.data.shape, (128, 256))
 
     # Assert perfect mathematical parity!
+    local_dst_view = multihost_utils.global_array_to_host_local_array(
+        dst_sharded_array, dst_mesh, jax.sharding.PartitionSpec(None, "z")
+    )
+    gathered_dst = multihost_utils.process_allgather(local_dst_view)
     np.testing.assert_array_equal(
-        np.asarray(dst_sharded_array), np.asarray(global_data)
+        np.squeeze(np.asarray(gathered_dst), axis=0), np.asarray(global_data)
     )
 
   def test_controller_piped_resharding_axis_1_4dev_to_axis_0_8dev(self):

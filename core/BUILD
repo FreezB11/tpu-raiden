@@ -342,3 +342,31 @@ cc_test(
         "@xla//xla/tsl/platform:test_main",
     ],
 )
+
+cc_test(
+    name = "transfer_engine_base_test",
+    srcs = ["transfer_engine_base_test.cc"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = [
+        "-use_header_modules",
+        "-layering_check",
+    ],
+    tags = [
+        "no_oss",
+        "requires-jellyfish",
+    ],
+    deps = [
+        ":tpu_pjrt_manager",
+        ":transfer_engine_base",
+        "//kv_cache:kv_cache_manager_base",
+        "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_external",
+        "@xla//xla/tsl/platform:status_matchers",
+        "@xla//xla/tsl/platform:statusor",
+        "@xla//xla/tsl/platform:test",
+        "@xla//xla/tsl/platform:test_main",
+    ],
+)

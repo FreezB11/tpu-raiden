@@ -101,3 +101,32 @@ cc_library(
 )
 
 # JAX test targets successfully relocated to api/jax/BUILD.
+
+cc_test(
+    name = "kv_cache_store_test",
+    srcs = ["kv_cache_store_test.cc"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = [
+        "-use_header_modules",
+        "-layering_check",
+    ],
+    tags = [
+        "no_oss",
+        "requires-jellyfish",
+    ],
+    deps = [
+        ":kv_cache_manager_base",
+        ":kv_cache_store",
+        "//core:raw_transfer_core",
+        "//core:tpu_pjrt_manager",
+        "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_external",
+        "@xla//xla/tsl/platform:status_matchers",
+        "@xla//xla/tsl/platform:statusor",
+        "@xla//xla/tsl/platform:test",
+        "@xla//xla/tsl/platform:test_main",
+    ],
+)

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@nanobind_abseil/google:nanobind.bzl", "nanobind_extension")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
@@ -62,9 +63,6 @@ cc_library(
 nanobind_extension(
     name = "_kv_cache_manager",
     srcs = ["kv_cache_manager_module.cc"],
-    copts = [
-        "-fexceptions",
-    ],
     features = [
         "-use_header_modules",
     ],
@@ -72,9 +70,9 @@ nanobind_extension(
     deps = [
         ":kv_cache_manager_torch",
         "//core:raw_transfer_core",
+        "//frameworks/torch:torch_nanobind_utils",
         "//kv_cache:kv_cache_manager_base",
         "@com_google_absl//absl/status:statusor",
-        "@pybind11",
         "@torch_tpu//shims/torch:torch_headers",
     ],
 )
@@ -156,12 +154,13 @@ nanobind_extension(
     deps = [
         ":kv_cache_manager_torch",
         "//core:raw_transfer_core",
+        "//frameworks/torch:torch_nanobind_utils",
         "//kv_cache:kv_cache_manager_base",
         "//transport:socket_transport",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@pybind11",
+        "@nanobind",
         "@torch_tpu//shims/torch:aten_headers",
         "@torch_tpu//shims/torch:torch_headers",
     ],

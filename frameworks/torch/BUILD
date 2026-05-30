@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@nanobind_abseil/google:nanobind.bzl", "nanobind_extension")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
@@ -52,19 +53,16 @@ cc_library(
 nanobind_extension(
     name = "_weight_synchronizer",
     srcs = ["weight_synchronizer_module.cc"],
-    copts = [
-        "-fexceptions",
-    ],
     features = [
         "-use_header_modules",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":torch_nanobind_utils",
         ":weight_synchronizer_torch",
         "//core:raw_transfer_core",
         "//weight_sync:weight_synchronizer_base",
         "@com_google_absl//absl/status",
-        "@pybind11",
         "@torch_tpu//shims/torch:torch_headers",
     ],
 )
@@ -110,5 +108,17 @@ cc_library(
         ":torch_tpu_utils",
         "@torch_tpu//shims/torch:aten_headers",
         "@xla//xla/pjrt:pjrt_client",
+    ],
+)
+
+cc_library(
+    name = "torch_nanobind_utils",
+    hdrs = ["torch_nanobind_utils.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@nanobind",
+        "@pybind11",
+        "@torch_tpu//shims/torch:aten_headers",
+        "@torch_tpu//shims/torch:torch_headers",
     ],
 )

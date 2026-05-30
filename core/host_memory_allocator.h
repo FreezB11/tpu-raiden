@@ -16,6 +16,7 @@
 #define THIRD_PARTY_TPU_RAIDEN_CORE_HOST_MEMORY_ALLOCATOR_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 

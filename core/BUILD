@@ -233,3 +233,28 @@ cc_test(
         "@xla//xla/tsl/platform:test_main",
     ],
 )
+
+cc_test(
+    name = "host_memory_allocator_test",
+    srcs = ["host_memory_allocator_test.cc"],
+    copts = [
+        "-fno-strict-aliasing",
+        "-fexceptions",
+    ],
+    features = [
+        "-use_header_modules",
+        "-layering_check",
+    ],
+    tags = [
+        "no_oss",
+        "requires-jellyfish",
+    ],
+    deps = [
+        ":host_memory_allocator",
+        ":tpu_pjrt_manager",
+        "@xla//xla/tsl/platform:status_matchers",
+        "@xla//xla/tsl/platform:statusor",
+        "@xla//xla/tsl/platform:test",
+        "@xla//xla/tsl/platform:test_main",
+    ],
+)

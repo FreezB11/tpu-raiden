@@ -24,10 +24,9 @@
 namespace nb = nanobind;
 
 NB_MODULE(_kv_cache_manager, m) {
-  // Bind JAX PjRtCopyFuture dynamically E2E!
-  nb::class_<raiden::PjRtCopyFuture>(m, "PjRtCopyFuture")
-      .def("Await", [](raiden::PjRtCopyFuture& self) { self.Await(); })
-      .def("IsReady", &raiden::PjRtCopyFuture::IsReady);
+  nb::module_::import_(
+      "google3.third_party.tpu_raiden.raiden_lib.raw_transfer.jax.raw_"
+      "transfer");
 
   nb::class_<tpu_raiden::kv_cache::jax::KVCacheManager>(m, "KVCacheManager")
       .def(nb::init<nb::list, int, std::optional<int>, std::optional<int>,

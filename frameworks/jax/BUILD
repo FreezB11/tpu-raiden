@@ -13,7 +13,7 @@
 # limitations under the License.
 
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -34,7 +34,6 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":jax_utils",
         ":utils",
         "//core:utils",
         "//kv_cache:kv_cache_manager_base",
@@ -162,7 +161,6 @@ cc_library(
         ":kv_cache_manager_jax",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
-        "@xla//xla/ffi/api:c_api",
         "@xla//xla/ffi/api:ffi",
         "@xla//xla/stream_executor:platform",
         "@xla//xla/stream_executor:platform_manager",
@@ -309,5 +307,61 @@ nanobind_extension(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@xla//xla/pjrt:status_casters",
+    ],
+)
+
+cc_library(
+    name = "kv_cache_manager_jax_mock",
+    srcs = ["kv_cache_manager_mock.cc"],
+    hdrs = ["kv_cache_manager.h"],
+    copts = [
+        "-fexceptions",
+    ],
+    defines = ["WITHOUT_PYTHON"],
+    features = ["-use_header_modules"],
+    deps = [
+        "//kv_cache:kv_cache_manager_base",
+        "@xla//xla/pjrt:pjrt_client",
+    ],
+)
+
+cc_library(
+    name = "kv_cache_manager_ffi_mock",
+    srcs = ["kv_cache_manager_ffi.cc"],
+    hdrs = [
+        "kv_cache_manager_ffi.h",
+        "kv_cache_manager_ffi_internal.h",
+    ],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        ":kv_cache_manager_jax_mock",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@xla//xla/ffi/api:ffi",
+        "@xla//xla/stream_executor:platform",
+        "@xla//xla/stream_executor:platform_manager",
+        "@xla//xla/stream_executor:stream",
+        "@xla//xla/stream_executor:stream_executor_h",
+    ],
+)
+
+cc_test(
+    name = "kv_cache_manager_ffi_test",
+    srcs = ["kv_cache_manager_ffi_test.cc"],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        ":kv_cache_manager_ffi_mock",
+        ":kv_cache_manager_jax_mock",
+        "@xla//xla/ffi/api:c_api",
+        "@xla//xla/ffi/api:ffi",
+        "@xla//xla/pjrt:pjrt_client",
+        "@xla//xla/pjrt/c:pjrt_c_api_raw_buffer_external",
+        "@xla//xla/pjrt/c_api_client:pjrt_c_api_client",
+        "@xla//xla/stream_executor:platform_manager",
+        "@xla//xla/stream_executor/host:host_platform",
+        "@xla//xla/tsl/platform:test",
+        "@xla//xla/tsl/platform:test_main",
     ],
 )

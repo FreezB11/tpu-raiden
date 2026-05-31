@@ -17,16 +17,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "xla/ffi/api/c_api.h"
 #include "xla/ffi/api/ffi.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/platform_manager.h"
@@ -40,13 +36,11 @@ namespace kv_cache {
 jax::KVCacheManager* g_kv_cache_managers[32] = {nullptr};
 std::unique_ptr<stream_executor::Stream> g_streams[32] = {nullptr};
 
-namespace {
-
-static int64_t g_block_byte_size = 0;
-static int64_t g_local_blocks_per_shard = 0;
+int64_t g_block_byte_size = 0;
+int64_t g_local_blocks_per_shard = 0;
 
 // FFI Init custom call implementation (Host CPU Executed)
-static xla::ffi::Error TriggerRaidenInitImpl(
+xla::ffi::Error TriggerRaidenInitImpl(
     xla::ffi::AnyBuffer x, xla::ffi::AnyBuffer shard_idx_buf,
     int64_t slice_byte_size, int32_t block_size, int32_t local_port,
     int32_t parallelism, int32_t host_blocks_to_allocate, int32_t num_layers,
@@ -134,7 +128,7 @@ static xla::ffi::Error TriggerRaidenInitImpl(
 }
 
 // FFI execution handler for Host-to-Device (H2D) transfers (Host-CPU Executed)
-static xla::ffi::Error TriggerRaidenH2dImpl(
+xla::ffi::Error TriggerRaidenH2dImpl(
     xla::ffi::AnyBuffer src_offsets, xla::ffi::AnyBuffer dst_offsets,
     xla::ffi::AnyBuffer copy_sizes, xla::ffi::AnyBuffer shard_idx_buf,
     xla::ffi::AnyBuffer cache_slice_buf, int32_t layer_idx,
@@ -228,7 +222,7 @@ static xla::ffi::Error TriggerRaidenH2dImpl(
 }
 
 // FFI execution handler for Device-to-Host (D2H) transfers (Host-CPU Executed)
-static xla::ffi::Error TriggerRaidenD2hImpl(
+xla::ffi::Error TriggerRaidenD2hImpl(
     xla::ffi::AnyBuffer src_offsets, xla::ffi::AnyBuffer dst_offsets,
     xla::ffi::AnyBuffer copy_sizes, xla::ffi::AnyBuffer shard_idx_buf,
     xla::ffi::AnyBuffer cache_slice_buf, int32_t layer_idx,
@@ -322,8 +316,6 @@ static xla::ffi::Error TriggerRaidenD2hImpl(
 
   return xla::ffi::Error::Success();
 }
-
-}  // namespace
 
 // Register Stateless initialization handler
 XLA_FFI_DEFINE_HANDLER(

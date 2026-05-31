@@ -12,30 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "frameworks/jax/kv_cache_manager.h"
-
 #include <cstdint>
-#include <utility>
+#include <optional>
+#include <stdexcept>
 #include <vector>
 
-#include "core/utils.h"
-#include "frameworks/jax/utils.h"
-
-namespace nb = nanobind;
+#include "xla/pjrt/pjrt_client.h"
+#include "frameworks/jax/kv_cache_manager.h"
+#include "kv_cache/kv_cache_manager_base.h"
 
 namespace tpu_raiden {
 namespace kv_cache {
 namespace jax {
 
+// Stub-implement the Python nb::list constructors so we don't require FFI utils
+// or nanobind linking
 KVCacheManager::KVCacheManager(
-    nb::list device_arrays, int block_size, std::optional<int> local_port,
+    nanobind::list device_arrays, int block_size, std::optional<int> local_port,
     std::optional<int> host_blocks_to_allocate,
     std::optional<std::vector<uintptr_t>> external_host_ptrs,
     bool unsafe_skip_buffer_lock, int parallelism)
-    : KVCacheManager(tpu_raiden::jax::UnpackJaxArrays(device_arrays),
-                     block_size, local_port, host_blocks_to_allocate,
-                     external_host_ptrs, unsafe_skip_buffer_lock, parallelism,
-                     std::move(device_arrays)) {}
+    : KVCacheManagerBase({}, block_size, local_port, host_blocks_to_allocate,
+                         std::nullopt, unsafe_skip_buffer_lock, parallelism) {
+  throw std::runtime_error(
+      "Python KVCacheManager constructor is unsupported in pure C++ FFI unit "
+      "tests.");
+}
 
 KVCacheManager::KVCacheManager(
     std::vector<std::vector<xla::PjRtBuffer*>> layer_buffers, int block_size,
@@ -43,14 +45,12 @@ KVCacheManager::KVCacheManager(
     std::optional<std::vector<uintptr_t>> external_host_ptrs,
     bool unsafe_skip_buffer_lock, int parallelism, nanobind::list device_arrays)
     : KVCacheManagerBase(layer_buffers, block_size, local_port,
-                         host_blocks_to_allocate,
-                         tpu_raiden::CastExternalPointers(external_host_ptrs),
-                         unsafe_skip_buffer_lock, parallelism,
-                         tpu_raiden::CreatePinnedHostAllocator(
-                             layer_buffers.empty() || layer_buffers[0].empty()
-                                 ? nullptr
-                                 : layer_buffers[0][0]->device()->client())),
-      device_arrays_(std::move(device_arrays)) {}
+                         host_blocks_to_allocate, std::nullopt,
+                         unsafe_skip_buffer_lock, parallelism) {
+  throw std::runtime_error(
+      "Python KVCacheManager constructor is unsupported in pure C++ FFI unit "
+      "tests.");
+}
 
 KVCacheManager::~KVCacheManager() = default;
 

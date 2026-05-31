@@ -19,7 +19,19 @@
 #include <optional>
 #include <vector>
 
+#ifndef WITHOUT_PYTHON
 #include <nanobind/nanobind.h>
+#else
+namespace nanobind {
+struct list {
+  // Minimal dummy implementation to allow compilation and trivial destruction
+  list() = default;
+  ~list() = default;
+  list(const list&) = default;
+  list& operator=(const list&) = default;
+};
+}  // namespace nanobind
+#endif
 #include "kv_cache/kv_cache_manager_base.h"
 
 namespace tpu_raiden {

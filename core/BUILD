@@ -118,6 +118,7 @@ cc_library(
     deps = [
         ":host_memory_allocator",
         "@com_google_absl//absl/status:statusor",
+        "@xla//xla:shape_util",
         "@xla//xla/pjrt:pjrt_client",
     ],
 )

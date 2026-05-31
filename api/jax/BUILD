@@ -22,6 +22,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//frameworks/jax:_kv_cache_manager",
+        "//raiden_lib/raw_transfer/jax:raw_transfer",
     ],
 )
 

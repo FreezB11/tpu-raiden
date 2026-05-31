@@ -15,17 +15,20 @@
 #ifndef THIRD_PARTY_TPU_RAIDEN_FRAMEWORKS_JAX_WEIGHT_SYNCHRONIZER_H_
 #define THIRD_PARTY_TPU_RAIDEN_FRAMEWORKS_JAX_WEIGHT_SYNCHRONIZER_H_
 
-#include <cstddef>
-#include <cstdint>
-#include <memory>
 #include <optional>
-#include <utility>
-#include <vector>
 
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
+#ifndef WITHOUT_PYTHON
 #include <nanobind/nanobind.h>
-#include "xla/pjrt/pjrt_client.h"
+#else
+namespace nanobind {
+struct list {
+  list() = default;
+  ~list() = default;
+  list(const list&) = default;
+  list& operator=(const list&) = default;
+};
+}  // namespace nanobind
+#endif
 #include "weight_sync/weight_synchronizer_base.h"
 
 namespace nb = nanobind;

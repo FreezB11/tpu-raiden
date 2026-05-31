@@ -365,3 +365,60 @@ cc_test(
         "@xla//xla/tsl/platform:test_main",
     ],
 )
+
+cc_library(
+    name = "weight_synchronizer_jax_mock",
+    srcs = ["weight_synchronizer_mock.cc"],
+    hdrs = ["weight_synchronizer.h"],
+    copts = ["-fexceptions"],
+    defines = ["WITHOUT_PYTHON"],
+    features = ["-use_header_modules"],
+    deps = [
+        "//weight_sync:weight_synchronizer_base",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@xla//xla/pjrt:pjrt_client",
+    ],
+)
+
+cc_library(
+    name = "weight_synchronizer_ffi_mock",
+    srcs = ["weight_synchronizer_ffi.cc"],
+    hdrs = [
+        "weight_synchronizer_ffi.h",
+        "weight_synchronizer_ffi_internal.h",
+    ],
+    copts = [
+        "-fexceptions",
+        "-march=x86-64-v2",
+    ],
+    features = ["-use_header_modules"],
+    deps = [
+        ":weight_synchronizer_jax_mock",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@xla//xla/ffi/api:ffi",
+        "@xla//xla/stream_executor:platform",
+        "@xla//xla/stream_executor:platform_manager",
+        "@xla//xla/stream_executor:stream",
+        "@xla//xla/stream_executor:stream_executor_h",
+    ],
+)
+
+cc_test(
+    name = "weight_synchronizer_ffi_test",
+    srcs = ["weight_synchronizer_ffi_test.cc"],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        ":weight_synchronizer_ffi_mock",
+        ":weight_synchronizer_jax_mock",
+        "@com_google_absl//absl/log",
+        "@xla//xla/ffi/api:c_api",
+        "@xla//xla/ffi/api:ffi",
+        "@xla//xla/stream_executor:platform_manager",
+        "@xla//xla/stream_executor/host:host_platform",
+        "@xla//xla/tsl/platform:test",
+        "@xla//xla/tsl/platform:test_main",
+    ],
+)

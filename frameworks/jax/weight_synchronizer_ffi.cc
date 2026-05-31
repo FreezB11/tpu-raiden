@@ -44,11 +44,9 @@ namespace weight_sync {
 jax::WeightSynchronizer* g_weight_synchronizers[32] = {nullptr};
 std::unique_ptr<stream_executor::Stream> g_streams[32] = {nullptr};
 
-namespace {
-
 // FFI Init custom call implementation for WeightSynchronizer (Host CPU
 // Executed)
-static xla::ffi::Error TriggerWeightSynchronizerInitImpl(
+xla::ffi::Error TriggerWeightSynchronizerInitImpl(
     xla::ffi::AnyBuffer x, xla::ffi::AnyBuffer shard_idx_buf,
     int64_t slice_byte_size, int32_t local_port, int32_t parallelism,
     int32_t num_layers, xla::ffi::Result<xla::ffi::AnyBuffer> out) {
@@ -170,7 +168,7 @@ static xla::ffi::Error TriggerWeightSynchronizerInitImpl(
 }
 
 // FFI execution handler for WeightSynchronizer D2H (Host CPU Executed)
-static xla::ffi::Error TriggerWeightSynchronizerD2hImpl(
+xla::ffi::Error TriggerWeightSynchronizerD2hImpl(
     xla::ffi::AnyBuffer anchor, xla::ffi::AnyBuffer shard_idx_buf,
     xla::ffi::Result<xla::ffi::AnyBuffer> out) {
   (void)out;
@@ -223,7 +221,7 @@ static xla::ffi::Error TriggerWeightSynchronizerD2hImpl(
 }
 
 // FFI execution handler for Resharding (Host CPU Executed)
-static xla::ffi::Error TriggerExecuteReshardingImpl(
+xla::ffi::Error TriggerExecuteReshardingImpl(
     xla::ffi::AnyBuffer anchor, xla::ffi::AnyBuffer shard_idx_buf,
     xla::ffi::AnyBuffer src_ips, xla::ffi::AnyBuffer src_ports,
     xla::ffi::AnyBuffer src_offsets, xla::ffi::AnyBuffer dst_offsets,
@@ -345,8 +343,6 @@ static xla::ffi::Error TriggerExecuteReshardingImpl(
 
   return xla::ffi::Error::Success();
 }
-
-}  // namespace
 
 XLA_FFI_DEFINE_HANDLER(
     kWSInit, TriggerWeightSynchronizerInitImpl,

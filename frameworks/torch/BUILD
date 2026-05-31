@@ -188,6 +188,7 @@ nanobind_extension(
         ":torch_tpu_utils",
         "//core:host_memory_allocator",
         "//core:raw_transfer_core",
+        "//core:utils",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@torch_tpu//shims/torch:aten_headers",

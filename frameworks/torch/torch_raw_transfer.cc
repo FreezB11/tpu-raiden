@@ -29,6 +29,7 @@
 #include "xla/pjrt/pjrt_client.h"
 #include "core/host_memory_allocator.h"
 #include "core/raw_transfer_core.h"
+#include "core/utils.h"
 #include "frameworks/torch/torch_nanobind_utils.h"
 #include "frameworks/torch/torch_tpu_utils.h"
 
@@ -142,44 +143,6 @@ T ValueOrThrow(const std::string& context, absl::StatusOr<T> value_or) {
   return std::move(value_or).value();
 }
 
-void ValidatePartialSpec(const std::vector<int64_t>& src_offsets_major_dim,
-                         const std::vector<int64_t>& dst_offsets_major_dim,
-                         const std::vector<int64_t>& copy_sizes_major_dim) {
-  bool present = !src_offsets_major_dim.empty() ||
-                 !dst_offsets_major_dim.empty() ||
-                 !copy_sizes_major_dim.empty();
-  if (present &&
-      (src_offsets_major_dim.size() != dst_offsets_major_dim.size() ||
-       src_offsets_major_dim.size() != copy_sizes_major_dim.size())) {
-    throw std::invalid_argument(
-        "src_offsets_major_dim, dst_offsets_major_dim, and "
-        "copy_sizes_major_dim must have the same length");
-  }
-  for (size_t i = 0; i < src_offsets_major_dim.size(); ++i) {
-    if (src_offsets_major_dim[i] < 0 || dst_offsets_major_dim[i] < 0 ||
-        copy_sizes_major_dim[i] < 0) {
-      throw std::invalid_argument(
-          "raw copy offsets and sizes must be non-negative");
-    }
-  }
-}
-
-bool IsPartial(const xla::Shape& shape,
-               const std::vector<int64_t>& src_offsets_major_dim,
-               const std::vector<int64_t>& dst_offsets_major_dim,
-               const std::vector<int64_t>& copy_sizes_major_dim) {
-  if (src_offsets_major_dim.empty()) return false;
-  if (shape.dimensions().size() == 0) return true;
-  const int64_t full_major_dim = shape.dimensions(0);
-  for (size_t i = 0; i < src_offsets_major_dim.size(); ++i) {
-    if (src_offsets_major_dim[i] != 0 || dst_offsets_major_dim[i] != 0 ||
-        copy_sizes_major_dim[i] != full_major_dim) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void ValidateCpuTensor(const at::Tensor& tensor, const char* role) {
   if (!tensor.device().is_cpu()) {
     throw std::invalid_argument(std::string(role) + " must be a CPU tensor");
@@ -205,52 +168,34 @@ void IssueD2HCopy(const std::shared_ptr<PjRtCopyFuture>& acc,
                   const std::vector<int64_t>& src_offsets_major_dim,
                   const std::vector<int64_t>& dst_offsets_major_dim,
                   const std::vector<int64_t>& copy_sizes_major_dim) {
-  const bool is_partial =
-      IsPartial(src_buffer->on_device_shape(), src_offsets_major_dim,
-                dst_offsets_major_dim, copy_sizes_major_dim);
+  const bool is_partial = tpu_raiden::IsPartialCopy(
+      src_buffer->on_device_shape(), src_offsets_major_dim,
+      dst_offsets_major_dim, copy_sizes_major_dim);
   const int64_t physical_size =
       ValueOrThrow("Failed to get source physical buffer size",
                    src_buffer->GetOnDeviceSizeInBytes());
   const int64_t slice_byte_size = GetMajorSliceByteSize(src_buffer);
 
   if (is_partial) {
-    if (src_buffer->on_device_shape().dimensions().size() < 3) {
-      throw std::invalid_argument(
-          "Only rank >= 3 TPU tensors support partial raw copies");
-    }
-    if (slice_byte_size % 4096 != 0) {
-      throw std::invalid_argument(
-          "Partial raw copies require a major-dimension slice size aligned to "
-          "4096 bytes");
-    }
+    tpu_raiden::ValidatePartialAlignment(src_buffer->on_device_shape(),
+                                         slice_byte_size);
   }
+
+  std::vector<tpu_raiden::RawCopyChunk> chunks =
+      tpu_raiden::ComputeAndValidateChunks(
+          slice_byte_size, physical_size, dst_size, is_partial,
+          src_offsets_major_dim, dst_offsets_major_dim, copy_sizes_major_dim,
+          /*is_d2h=*/true);
 
   BufferHoldAndAlias hold =
       ValueOrThrow("Failed to acquire source raw buffer",
                    BufferHoldAndAlias::Acquire(src_buffer));
   std::vector<xla::Future<>> futures;
-  if (!is_partial) {
-    if (dst_size < static_cast<size_t>(physical_size)) {
-      throw std::invalid_argument("Destination CPU tensor is too small");
-    }
+  futures.reserve(chunks.size());
+  for (const auto& chunk : chunks) {
     nb::gil_scoped_release release;
-    futures.push_back(hold.CopyRawDeviceToHost(dst_data, 0, physical_size));
-  } else {
-    for (size_t i = 0; i < src_offsets_major_dim.size(); ++i) {
-      const int64_t src_offset = src_offsets_major_dim[i] * slice_byte_size;
-      const int64_t dst_offset = dst_offsets_major_dim[i] * slice_byte_size;
-      const int64_t size_to_copy = copy_sizes_major_dim[i] * slice_byte_size;
-      if (src_offset + size_to_copy > physical_size) {
-        throw std::invalid_argument("Copy range exceeds source TPU buffer");
-      }
-      if (dst_offset + size_to_copy > static_cast<int64_t>(dst_size)) {
-        throw std::invalid_argument(
-            "Copy range exceeds destination CPU tensor");
-      }
-      nb::gil_scoped_release release;
-      futures.push_back(hold.CopyRawDeviceToHost(dst_data + dst_offset,
-                                                 src_offset, size_to_copy));
-    }
+    futures.push_back(hold.CopyRawDeviceToHost(
+        dst_data + chunk.dst_offset, chunk.src_offset, chunk.size_bytes));
   }
   acc->Append(std::move(futures), hold);
 }
@@ -261,52 +206,34 @@ void IssueH2DCopy(const std::shared_ptr<PjRtCopyFuture>& acc,
                   const std::vector<int64_t>& src_offsets_major_dim,
                   const std::vector<int64_t>& dst_offsets_major_dim,
                   const std::vector<int64_t>& copy_sizes_major_dim) {
-  const bool is_partial =
-      IsPartial(dst_buffer->on_device_shape(), src_offsets_major_dim,
-                dst_offsets_major_dim, copy_sizes_major_dim);
+  const bool is_partial = tpu_raiden::IsPartialCopy(
+      dst_buffer->on_device_shape(), src_offsets_major_dim,
+      dst_offsets_major_dim, copy_sizes_major_dim);
   const int64_t physical_size =
       ValueOrThrow("Failed to get destination physical buffer size",
                    dst_buffer->GetOnDeviceSizeInBytes());
   const int64_t slice_byte_size = GetMajorSliceByteSize(dst_buffer);
 
   if (is_partial) {
-    if (dst_buffer->on_device_shape().dimensions().size() < 3) {
-      throw std::invalid_argument(
-          "Only rank >= 3 TPU tensors support partial raw copies");
-    }
-    if (slice_byte_size % 4096 != 0) {
-      throw std::invalid_argument(
-          "Partial raw copies require a major-dimension slice size aligned to "
-          "4096 bytes");
-    }
+    tpu_raiden::ValidatePartialAlignment(dst_buffer->on_device_shape(),
+                                         slice_byte_size);
   }
+
+  std::vector<tpu_raiden::RawCopyChunk> chunks =
+      tpu_raiden::ComputeAndValidateChunks(
+          slice_byte_size, physical_size, src_size, is_partial,
+          src_offsets_major_dim, dst_offsets_major_dim, copy_sizes_major_dim,
+          /*is_d2h=*/false);
 
   BufferHoldAndAlias hold =
       ValueOrThrow("Failed to acquire destination raw buffer",
                    BufferHoldAndAlias::Acquire(dst_buffer));
   std::vector<xla::Future<>> futures;
-  if (!is_partial) {
-    if (src_size < static_cast<size_t>(physical_size)) {
-      throw std::invalid_argument("Source CPU tensor is too small");
-    }
+  futures.reserve(chunks.size());
+  for (const auto& chunk : chunks) {
     nb::gil_scoped_release release;
-    futures.push_back(hold.CopyRawHostToDevice(src_data, 0, physical_size));
-  } else {
-    for (size_t i = 0; i < src_offsets_major_dim.size(); ++i) {
-      const int64_t src_offset = src_offsets_major_dim[i] * slice_byte_size;
-      const int64_t dst_offset = dst_offsets_major_dim[i] * slice_byte_size;
-      const int64_t size_to_copy = copy_sizes_major_dim[i] * slice_byte_size;
-      if (src_offset + size_to_copy > static_cast<int64_t>(src_size)) {
-        throw std::invalid_argument("Copy range exceeds source CPU tensor");
-      }
-      if (dst_offset + size_to_copy > physical_size) {
-        throw std::invalid_argument(
-            "Copy range exceeds destination TPU buffer");
-      }
-      nb::gil_scoped_release release;
-      futures.push_back(hold.CopyRawHostToDevice(src_data + src_offset,
-                                                 dst_offset, size_to_copy));
-    }
+    futures.push_back(hold.CopyRawHostToDevice(
+        src_data + chunk.src_offset, chunk.dst_offset, chunk.size_bytes));
   }
   acc->Append(std::move(futures), hold);
 }
@@ -319,8 +246,8 @@ std::shared_ptr<PjRtCopyFuture> TransferD2HBatchAsync(
   if (src_arrs.size() != dst_arrs.size()) {
     throw std::invalid_argument("Lengths of src_arrs and dst_arrs must match");
   }
-  ValidatePartialSpec(src_offsets_major_dim, dst_offsets_major_dim,
-                      copy_sizes_major_dim);
+  tpu_raiden::ValidatePartialSpec(src_offsets_major_dim, dst_offsets_major_dim,
+                                  copy_sizes_major_dim);
   auto acc = std::make_shared<PjRtCopyFuture>(std::vector<xla::Future<>>{});
   for (size_t i = 0; i < src_arrs.size(); ++i) {
     ValidateCpuTensor(dst_arrs[i], "Destination");
@@ -344,8 +271,8 @@ std::shared_ptr<PjRtCopyFuture> TransferH2DBatchAsync(
   if (src_arrs.size() != dst_arrs.size()) {
     throw std::invalid_argument("Lengths of src_arrs and dst_arrs must match");
   }
-  ValidatePartialSpec(src_offsets_major_dim, dst_offsets_major_dim,
-                      copy_sizes_major_dim);
+  tpu_raiden::ValidatePartialSpec(src_offsets_major_dim, dst_offsets_major_dim,
+                                  copy_sizes_major_dim);
   auto acc = std::make_shared<PjRtCopyFuture>(std::vector<xla::Future<>>{});
   for (size_t i = 0; i < src_arrs.size(); ++i) {
     ValidateCpuTensor(src_arrs[i], "Source");

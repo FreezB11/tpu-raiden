@@ -254,7 +254,7 @@ absl::StatusOr<peregrine::Handle> SocketTransport::Post(
 
 absl::Status SocketTransport::DispatchWrite(int fd,
                                             const peregrine::Request& request) {
-  PacketHeader header;
+  PacketHeader header = {};
   header.op = peregrine::Op::kWrite;
   header.remote_addr = reinterpret_cast<uint64_t>(request.raddr);
   header.local_addr = 0;
@@ -274,7 +274,7 @@ absl::Status SocketTransport::DispatchWrite(int fd,
 
 absl::Status SocketTransport::DispatchReadRequest(
     int fd, const peregrine::Request& request) {
-  PacketHeader header;
+  PacketHeader header = {};
   header.op = peregrine::Op::kRead;
   header.remote_addr = reinterpret_cast<uint64_t>(request.raddr);
   header.local_addr = reinterpret_cast<uint64_t>(request.laddr);
@@ -379,7 +379,7 @@ void SocketTransport::ConnectionWorker(int client_fd) {
       // Read local memory to send back as a response write packet
       uint8_t* src_ptr = reinterpret_cast<uint8_t*>(header.remote_addr);
 
-      PacketHeader resp_header;
+      PacketHeader resp_header = {};
       resp_header.op = peregrine::Op::kWrite;
       resp_header.remote_addr = header.local_addr;
       resp_header.local_addr = 0;

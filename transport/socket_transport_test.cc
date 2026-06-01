@@ -53,16 +53,16 @@ TEST(SocketTransportTest, PointToPointWriteTransfer) {
   // Instantiate two endpoints on separate ports.
   int port1 = 23456;
   int port2 = 23457;
+  // Allocate source and destination memory payloads.
+  std::string src_payload =
+      "Hello Distributed KV Cache Transfer via POSIX TCP!";
+  std::vector<uint8_t> dst_payload(src_payload.size(), 0);
+
   auto transport1 = std::make_unique<SocketTransport>(port1);
   auto transport2 = std::make_unique<SocketTransport>(port2);
 
   // Give background server listeners a moment to initialize listening sockets.
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Allocate source and destination memory payloads.
-  std::string src_payload =
-      "Hello Distributed KV Cache Transfer via POSIX TCP!";
-  std::vector<uint8_t> dst_payload(src_payload.size(), 0);
 
   // Prepare peregrine Request struct mapping remote memory pointers cleanly.
   peregrine::Request request;
@@ -88,13 +88,13 @@ TEST(SocketTransportTest, PointToPointWriteTransfer) {
 TEST(SocketTransportTest, PointToPointReadTransfer) {
   int port1 = 23458;
   int port2 = 23459;
+  std::string remote_payload = "Remote data sequence ready to pull!";
+  std::vector<uint8_t> local_payload(remote_payload.size(), 0);
+
   auto transport1 = std::make_unique<SocketTransport>(port1);
   auto transport2 = std::make_unique<SocketTransport>(port2);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  std::string remote_payload = "Remote data sequence ready to pull!";
-  std::vector<uint8_t> local_payload(remote_payload.size(), 0);
 
   peregrine::Request request;
   request.op = peregrine::Op::kRead;
